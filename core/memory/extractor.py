@@ -20,6 +20,7 @@ CRITICAL RULES:
 4. If no facts found, output: []
 5. Subject is usually "user" for personal info. Use specific entities (e.g., "bruno", "lenovo_laptop") when appropriate.
 6. For multiple values (hobbies, interests), create separate facts with SAME subject and predicate.
+7. DO NOT extract facts from questions, commands, or conversational filler (e.g., "what is my name?", "hello"). Return [] for questions.
 
 User message: {message}
 

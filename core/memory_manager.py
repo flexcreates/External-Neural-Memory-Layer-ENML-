@@ -67,7 +67,7 @@ class MemoryManager:
         
     def update_profile(self, user_interaction: str):
         """Phase 2: Extract semantic triples, construct EnrichedFacts via EntityLinker, and save to knowledge collection."""
-        from .knowledge_graph import EntityLinker
+        from .knowledge_graph import EntityLinker, MULTI_VALUE_PREDICATES
         
         # Instantiate Linker with the embedding service instance from retriever
         entity_linker = EntityLinker(embedding_service=self.retriever.embedding_service)
@@ -82,19 +82,41 @@ class MemoryManager:
             
             if not predicate or not obj:
                 continue
-                
-            # Delegate temporal contradiction resolution and taxonomic linking
-            enriched_fact = entity_linker.store_fact({
+            
+            # CRITICAL FIX: Check if this is a multi-value predicate
+            # If so, check for exact duplicates but allow multiple different values
+            is_multi_value = predicate in MULTI_VALUE_PREDICATES
+            
+            if is_multi_value:
+                # Search for existing similar facts to avoid exact duplicates
+                existing = self._find_existing_fact(subject, predicate, obj)
+                if existing:
+                    logger.debug(f"Skipping duplicate: {subject} {predicate} {obj}")
+                    continue
+                # For multi-value, we don't check for "contradictions" - we just add
+                status = "active"
+            else:
+                # For single-value, use the entity linker's contradiction detection
+                enriched_fact = entity_linker.store_fact({
+                    "subject": subject,
+                    "predicate": predicate,
+                    "object": obj,
+                    "confidence": confidence
+                })
+                status = enriched_fact.status
+            
+            # Build payload
+            payload = {
                 "subject": subject,
                 "predicate": predicate,
                 "object": obj,
-                "confidence": confidence
-            })
-            
-            logger.info(f"MemoryManager: Processed Fact -> {subject} {predicate} {obj} [Status: {enriched_fact.status}]")
-            
-            payload = enriched_fact.to_dict()
+                "confidence": confidence,
+                "timestamp": datetime.now().isoformat(),
+                "status": status
+            }
             payload["text"] = f"{subject} {predicate} {obj}."
+            
+            logger.info(f"MemoryManager: Processed Fact -> {subject} {predicate} {obj} [Status: {status}]")
             
             # Store in Qdrant with status metadata
             self.retriever.add_memory(
@@ -102,3 +124,24 @@ class MemoryManager:
                 text=payload["text"],
                 payload=payload
             )
+    
+    def _find_existing_fact(self, subject: str, predicate: str, obj: str) -> Optional[Dict]:
+        """Check if exact fact already exists to prevent duplicates."""
+        try:
+            # Search for subject+predicate combinations
+            query = f"{subject} {predicate}"
+            results = self.retriever.search(
+                QDRANT_KNOWLEDGE_COLLECTION, 
+                query, 
+                limit=5,
+                filter_dict={"subject": subject, "predicate": predicate}
+            )
+            
+            for r in results:
+                payload = r.get("payload", {})
+                if payload.get("object") == obj:
+                    return payload
+            return None
+        except Exception as e:
+            logger.debug(f"Error checking for existing fact: {e}")
+            return None
