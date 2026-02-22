@@ -13,10 +13,10 @@ env.bak/
 venv.bak/
 
 # Agent Memory (Do not commit DBs or Private data)
-memory/
-qdrant_storage/
-logs/
-data/
+/memory/
+/qdrant_storage/
+/logs/
+/data/
 
 # IDE files
 .vscode/
