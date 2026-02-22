@@ -16,13 +16,16 @@ logger = get_logger(__name__)
 class MemoryManager:
     def __init__(self):
         """
-        Initializes the MemoryManager with Qdrant and JSON backends.
+        Initializes the MemoryManager with Qdrant, JSON backends, and Feedback.
         """
+        from .memory_feedback import MemoryFeedbackSystem
+        
         self.json_storage = JSONStorage(sessions_dir=CONVERSATIONS_DIR)
         self.retriever = Retriever()
         self.query_router = QueryRouter()
         self.authority_memory = AuthorityMemory()
         self.extractor = MemoryExtractor()
+        self.feedback = MemoryFeedbackSystem()
 
     def save_session(self, session_id: str, messages: List[Dict[str, Any]]) -> Path:
         """Saves a full conversation session."""
@@ -63,8 +66,13 @@ class MemoryManager:
         return ""
         
     def update_profile(self, user_interaction: str):
-        """Phase 2: Extract semantic triples, construct MemoryTriple, and save to knowledge collection."""
-        facts = self.extractor.extract_facts(user_interaction)
+        """Phase 2: Extract semantic triples, construct EnrichedFacts via EntityLinker, and save to knowledge collection."""
+        from .knowledge_graph import EntityLinker
+        
+        # Instantiate Linker with the embedding service instance from retriever
+        entity_linker = EntityLinker(embedding_service=self.retriever.embedding_service)
+        
+        facts = self.extractor.extract_facts(user_input=user_interaction)
         
         for fact in facts:
             subject = fact.get("subject", "user").lower()
@@ -72,29 +80,23 @@ class MemoryManager:
             obj = fact.get("object", "")
             confidence = float(fact.get("confidence", 0.0))
             
-            # Temporal constraints aren't needed at this layer; extractor prompt handles graph logic.
-            
-            if confidence < 0.75:
-                logger.info(f"MemoryManager: Ignored triple '{predicate}' due to low confidence ({confidence})")
-                continue
-                
             if not predicate or not obj:
                 continue
                 
-            triple = MemoryTriple(
-                subject=subject,
-                predicate=predicate,
-                object=obj,
-                confidence=confidence,
-                timestamp=datetime.now(),
-                source="user"
-            )
+            # Delegate temporal contradiction resolution and taxonomic linking
+            enriched_fact = entity_linker.store_fact({
+                "subject": subject,
+                "predicate": predicate,
+                "object": obj,
+                "confidence": confidence
+            })
             
-            logger.info(f"MemoryManager: Saving Semantic Triple Fact -> {triple.natural_sentence}")
+            logger.info(f"MemoryManager: Processed Fact -> {subject} {predicate} {obj} [Status: {enriched_fact.status}]")
             
-            payload = triple.to_dict()
-            payload["text"] = triple.natural_sentence
+            payload = enriched_fact.to_dict()
+            payload["text"] = f"{subject} {predicate} {obj}."
             
+            # Store in Qdrant with status metadata
             self.retriever.add_memory(
                 collection=QDRANT_KNOWLEDGE_COLLECTION,
                 text=payload["text"],

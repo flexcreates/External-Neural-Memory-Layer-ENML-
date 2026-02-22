@@ -15,34 +15,47 @@ LLAMA_SERVER="${LLAMA_SERVER:-/path/to/llama.cpp/llama-server}"
 PORT=8080
 HOST="0.0.0.0"
 CONTEXT_SIZE=3072
-GPU_LAYERS=32
 BATCH_SIZE=1024
 
-# Check if model exists
-if [ ! -f "$MODEL_PATH" ]; then
-    echo "Error: Model not found at $MODEL_PATH"
-    exit 1
+# Dynamic VRAM Layer Offloading Calculation
+if command -v nvidia-smi &> /dev/null; then
+    VRAM_MB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits | head -n1)
+    # Reserve 800MB for context, KV cache, and OS overhead
+    RESERVED_MB=800
+    AVAILABLE_FOR_LAYERS=$((VRAM_MB - RESERVED_MB))
+
+    # Each layer ~140MB for 8B Q4_K_M
+    LAYER_SIZE_MB=140
+    MAX_LAYERS=32
+
+    # Calculate optimal layers
+    OPTIMAL_NGL=$((AVAILABLE_FOR_LAYERS / LAYER_SIZE_MB))
+    FINAL_NGL=$((OPTIMAL_NGL < MAX_LAYERS ? OPTIMAL_NGL : MAX_LAYERS))
+    if [ "$FINAL_NGL" -lt 0 ]; then FINAL_NGL=0; fi
+else
+    # Fallback if no NVIDIA gpu
+    VRAM_MB="UNKNOWN"
+    FINAL_NGL=32
 fi
 
-# Check if server binary exists
-if [ ! -f "$LLAMA_SERVER" ]; then
-    echo "Error: llama-server not found at $LLAMA_SERVER"
-    exit 1
-fi
-
-echo "Starting Llama 3 Server (Optimized for RTX 3050 6GB)..."
+echo "Starting Llama 3 Server (Optimized for Stability & Caching)..."
 echo "Model: $MODEL_PATH"
 echo "URL: http://localhost:$PORT"
-echo "Config: -ngl $GPU_LAYERS | -b $BATCH_SIZE | --parallel 1 | --cache-ram 0"
+echo "VRAM Available: ${VRAM_MB}MB | Calculated Safe Layers: -ngl ${FINAL_NGL}"
 
-# Run Server
+# Run Server with Advanced V2.1 Context Optimization Flags
 "$LLAMA_SERVER" \
     -m "$MODEL_PATH" \
     -c "$CONTEXT_SIZE" \
-    -ngl "$GPU_LAYERS" \
+    -ngl "$FINAL_NGL" \
     -b "$BATCH_SIZE" \
     --parallel 1 \
-    --cache-ram 0 \
+    --cache-ram 512 \
+    --mlock \
+    --rope-scaling linear \
+    --flash-attn on \
+    --defrag-thold 0.1 \
+    --metrics \
     --port "$PORT" \
     --host "$HOST" \
     --temp 0.6 \

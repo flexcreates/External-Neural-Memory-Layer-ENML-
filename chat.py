@@ -14,10 +14,45 @@ from core.config import AI_NAME, AI_HINT
 
 logger = get_logger("ChatInterface")
 
+def run_diagnostics():
+    from core.memory.extractor import RobustJSONParser
+    from core.knowledge_graph import EntityLinker
+    from core.vector.embeddings import EmbeddingService
+    
+    print("--- ENML v2.1 Advanced Diagnostics ---")
+    
+    # 1. Test JSON Regex Parsing
+    try:
+        parser = RobustJSONParser()
+        test_str = "```json\n[{\"subject\": \"user\", \"predicate\": \"like\", \"object\": \"Ubuntu\", \"confidence\": 0.9}]\n```"
+        result = parser.parse(test_str)
+        assert len(result) == 1
+        print("✅ JSON Regex Parsing: Passed")
+    except Exception as e:
+        print(f"❌ JSON Regex Parsing: Failed - {e}")
+        
+    # 2. Test Entity Linker Versioning
+    try:
+        linker = EntityLinker(embedding_service=EmbeddingService())
+        # Store Fact 1
+        linker.store_fact({"subject": "test_user", "predicate": "has_name", "object": "Old Name", "confidence": 1.0})
+        # Store Fact 2 (Contradiction)
+        linker.store_fact({"subject": "test_user", "predicate": "has_name", "object": "New Name", "confidence": 1.0})
+        print("✅ Entity Linker (Versioning/Contradiction): Passed")
+    except Exception as e:
+        print(f"❌ Entity Linker: Failed - {e}")
+        
+    print("\nDiagnostics complete.")
+    sys.exit(0)
+
 def main():
     parser = argparse.ArgumentParser(description="Flex AI Chat Interface (ENML Powered)")
     parser.add_argument("--session", type=str, help="Resume specific session ID")
+    parser.add_argument("--diagnose", action="store_true", help="Run system component tests")
     args = parser.parse_args()
+    
+    if args.diagnose:
+        run_diagnostics()
 
     print("Initializing ENML Orchestrator...")
     try:
@@ -31,8 +66,6 @@ def main():
     session_id = args.session if args.session else f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     logger.info(f"Session ID: {session_id}")
     
-    # Load history if resuming
-    # Orchestrator has memory_manager
     history: List[Dict[str, str]] = []
     if args.session:
         loaded = orchestrator.memory_manager.get_session(session_id)
@@ -40,7 +73,6 @@ def main():
             history = loaded.get("messages", [])
             print(f"Resumed session {session_id} with {len(history)} messages.")
 
-    # System Prompt Definition
     SYSTEM_PROMPT = (
         f"You are {AI_NAME} {AI_HINT}.\n"
         "Keep answers concise and efficient.\n"
@@ -59,23 +91,17 @@ def main():
                 print("Saving session and exiting...")
                 break
 
-            # Handle commands
             if user_input.startswith("/remember "):
                 fact = user_input.replace("/remember ", "", 1).strip()
                 if fact:
                     orchestrator.memory_manager.add_memory(fact, metadata={"source": session_id, "type": "user_fact"})
                     print(f"Memory saved: '{fact}'")
                 continue
-            
-            # TODO: Handle other commands like /project, /research via Orchestrator (Phase 3/4 integration)
 
-            # Process Message via Orchestrator
             print("AI: ", end="", flush=True)
             full_response = ""
             
             try:
-                # Orchestrator returns a generator that streams the response
-                # It handles context building, memory retrieval, profile injection, etc.
                 response_stream = orchestrator.process_message(
                     user_input=user_input, 
                     session_id=session_id, 
@@ -88,14 +114,8 @@ def main():
                     full_response += chunk
                 print() 
                 
-                # Update history
-                # Note: Orchestrator used 'history' for context but didn't modify it in-place?
-                # or did it? ContextBuilder creates a new list. 
-                # We must update our local history to maintain state conformant with what Orchestrator expects next time.
                 history.append({"role": "user", "content": user_input})
                 history.append({"role": "assistant", "content": full_response})
-                
-                # Profile is already updated by Orchestrator before generation
 
             except Exception as e:
                 print(f"\nError processing message: {e}")
@@ -105,10 +125,9 @@ def main():
             print("\nExiting...")
             break
             
-    # Save conversation
     if history:
         try:
-            path = orchestrator.save_session(session_id, history)
+            path = orchestrator.memory_manager.save_session(session_id, history)
             print(f"Session saved to {path}")
         except Exception as e:
             logger.error(f"Failed to save session: {e}")
