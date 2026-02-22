@@ -2,13 +2,42 @@ import json
 import uuid
 import numpy as np
 from pathlib import Path
-from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 from .config import GRAPH_DIR
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+# CRITICAL FIX: Define which predicates support multiple values (list semantics)
+MULTI_VALUE_PREDICATES: Set[str] = {
+    # Interests & hobbies
+    'has_interest', 'has_hobby', 'likes', 'enjoys', 'loves', 'prefers',
+    # Pets
+    'has_pet', 'owns_pet', 'has_dog', 'has_cat', 'has_pet_name', 'pet_name', 'has_name_of_pet',
+    # Devices & tech
+    'has_computer', 'uses_computer', 'has_device',
+    # Usage (generic - user can use multiple things)
+    'uses', 'uses_os', 'uses_tool', 'runs',
+    # Skills & knowledge
+    'knows', 'speaks', 'has_skill', 'works_with', 'creates', 'makes',
+    # Projects & work
+    'has_project', 'working_on', 'is_working_on', 'works_on',
+    # Food & preferences
+    'has_preferred_dish', 'has_favorite_food', 'likes_food', 'eats',
+    # Physical traits (can have multiple)
+    'has_moles', 'has_tattoo', 'has_scar',
+    # Relationships (can have multiple)
+    'has_friend', 'has_sibling', 'has_colleague',
+}
+
+# Predicates that should only have ONE value (replace semantics)
+SINGLE_VALUE_PREDICATES: Set[str] = {
+    'has_name', 'preferred_name', 'legal_name', 'first_name', 'last_name',
+    'birthdate', 'is_a', 'has_type', 'is_type', 'gender', 'age',
+    'has_id', 'email', 'phone'
+}
 
 @dataclass
 class EnrichedFact:
@@ -20,7 +49,7 @@ class EnrichedFact:
     confidence: float = 1.0
     status: str = "active" # active, superseded, alternative
     superseded_by: Optional[str] = None
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = field(default_factory=datetime.now)
     source: str = "user"
     
     def to_dict(self):
@@ -133,7 +162,17 @@ class EntityLinker:
         """Determines if two facts conflict based on semantics."""
         if old.predicate != new.predicate:
             return False
-            
+        
+        # CRITICAL FIX: Skip contradiction check for multi-value predicates
+        if old.predicate in MULTI_VALUE_PREDICATES:
+            # Check if it's the EXACT same value (duplicate)
+            old_val = (old.object_literal or "").lower().strip()
+            new_val = (new.object_literal or "").lower().strip()
+            if old_val == new_val:
+                return False  # Exact duplicate, will be filtered elsewhere
+            return False  # Different values for multi-value predicate = NOT a contradiction
+        
+        # For single-value predicates, check semantic similarity
         old_val = old.object_literal or ""
         new_val = new.object_literal or ""
         
@@ -148,6 +187,14 @@ class EntityLinker:
             except Exception:
                 return True
                 
+        return False
+
+    def _check_exact_duplicate(self, existing_versions: List[EnrichedFact], new_fact: EnrichedFact) -> bool:
+        """Check if exact same fact already exists."""
+        for fact in existing_versions:
+            if (fact.object_literal or "").lower().strip() == (new_fact.object_literal or "").lower().strip():
+                if fact.status == "active":
+                    return True
         return False
 
     def store_fact(self, fact_kwargs: dict) -> EnrichedFact:
@@ -167,8 +214,30 @@ class EntityLinker:
         key = f"{subject_entity.id}_{new_fact.predicate}"
         existing_versions = self.fact_versions.get(key, [])
         
+        # CRITICAL FIX: Check for exact duplicates first
+        if self._check_exact_duplicate(existing_versions, new_fact):
+            logger.debug(f"EntityLinker: Exact duplicate found for {new_fact.predicate} {new_fact.object_literal}")
+            # Return the existing active fact
+            for fact in reversed(existing_versions):
+                if fact.status == "active":
+                    return fact
+        
+        # CRITICAL FIX: Handle multi-value predicates (hobbies, interests, pets)
+        if new_fact.predicate in MULTI_VALUE_PREDICATES:
+            # Just add as new active fact, don't check for contradictions
+            new_fact.status = "active"
+            existing_versions.append(new_fact)
+            self.fact_versions[key] = existing_versions
+            
+            # Save state
+            raw_facts = {k: [f.to_dict() for f in versions] for k, versions in self.fact_versions.items()}
+            self._save_json(self.facts_path, raw_facts)
+            
+            logger.info(f"EntityLinker: Added multi-value fact -> {new_fact.subject_id} {new_fact.predicate} {new_fact.object_literal}")
+            return new_fact
+        
+        # Handle single-value predicates (names, identity) with contradiction detection
         if existing_versions:
-            # Check the latest active fact
             active_facts = [f for f in existing_versions if f.status == "active"]
             if active_facts:
                 latest = active_facts[-1]
@@ -192,3 +261,17 @@ class EntityLinker:
         self._save_json(self.facts_path, raw_facts)
         
         return new_fact
+
+    def get_current_facts(self, subject_id: str, predicate: Optional[str] = None) -> List[EnrichedFact]:
+        """Get all active facts for a subject, optionally filtered by predicate."""
+        results = []
+        
+        for key, versions in self.fact_versions.items():
+            if key.startswith(f"{subject_id}_"):
+                if predicate and not key.endswith(f"_{predicate}"):
+                    continue
+                    
+                active = [f for f in versions if f.status == "active"]
+                results.extend(active)
+        
+        return results

@@ -36,8 +36,18 @@ class Retriever:
         )
         logger.info(f"Added memory to {collection} with ID {memory_id}")
 
-    def search(self, collection: str, query: str, limit: int = 5, filter_conditions: Optional[list] = None) -> List[Dict[str, Any]]:
-        """Hybrid Semantic Search against a specific collection."""
+    def search(self, collection: str, query: str, limit: int = 5, 
+               filter_conditions: Optional[list] = None,
+               filter_dict: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        """Hybrid Semantic Search against a specific collection.
+        
+        Args:
+            collection: Qdrant collection name to search.
+            query: Natural language query string.
+            limit: Maximum number of results to return.
+            filter_conditions: Raw Qdrant FieldCondition list (advanced).
+            filter_dict: Simple key-value dict converted to exact-match filters.
+        """
         query_vector = self.embedding_service.embed(query)
         
         # We implicitly only ever want 'active' or 'alternative' facts, never 'superseded' ones
@@ -48,23 +58,39 @@ class Retriever:
             )
         ]
         
-        query_filter = models.Filter(must_not=must_not_conditions)
+        # Build must conditions from filter_dict and/or filter_conditions
+        must_conditions = []
         if filter_conditions:
-            query_filter.must = filter_conditions
+            must_conditions.extend(filter_conditions)
+        if filter_dict:
+            for key, value in filter_dict.items():
+                must_conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        match=models.MatchValue(value=value)
+                    )
+                )
+        
+        query_filter = models.Filter(
+            must_not=must_not_conditions,
+            must=must_conditions if must_conditions else None
+        )
             
         # 1. Broad Vector Similarity Lookup
-        response = self.qdrant_manager.client.query_points(
-            collection_name=collection,
-            query=query_vector,
-            limit=limit * 2, # Fetch double and rank locally
-            query_filter=query_filter,
-            with_payload=True
-        )
-        
-        results = response.points
+        try:
+            response = self.qdrant_manager.client.query_points(
+                collection_name=collection,
+                query=query_vector,
+                limit=limit * 2,  # Fetch double and rank locally
+                query_filter=query_filter,
+                with_payload=True
+            )
+            results = response.points
+        except Exception as e:
+            logger.error(f"Qdrant search failed on '{collection}': {e}")
+            return []
                 
         # 2. Local Re-Ranking (Entity Match + Recency)
-        # In a full v3 system, entity linker extracts keywords from args. Here, we parse basic nouns.
         query_lower = query.lower()
         
         scored_results = []
@@ -77,7 +103,7 @@ class Retriever:
             # Entity keyword matching boost
             subject = payload.get("subject", "").lower()
             predicate = payload.get("predicate", "").lower()
-            obj_val = payload.get("object_literal", "").lower()
+            obj_val = payload.get("object", payload.get("object_literal", "")).lower()
             
             if subject and subject in query_lower:
                 score += 0.2

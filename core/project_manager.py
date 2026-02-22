@@ -75,9 +75,10 @@ class ProjectManager:
         index = {}
         if index_path.exists():
             try:
-                with open(index_path, 'r') as f:
+                with open(index_path, 'r', encoding='utf-8') as f:
                     index = json.load(f)
-            except: pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Could not load file index {index_path}: {e}")
             
         if filename not in index:
             index[filename] = {"versions": [], "last_modified": ""}

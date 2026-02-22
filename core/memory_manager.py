@@ -65,14 +65,35 @@ class MemoryManager:
         # Phase 5 placeholder
         return ""
         
-    def update_profile(self, user_interaction: str):
-        """Phase 2: Extract semantic triples, construct EnrichedFacts via EntityLinker, and save to knowledge collection."""
+    def update_profile(self, user_interaction: str, conversation_history: list = None):
+        """Extract semantic triples and route them based on subject:
+        
+        - subject='assistant' → stored in AuthorityMemory (deterministic JSON profile)
+        - subject='user' or other → stored in Knowledge Graph + Qdrant
+        
+        This prevents the AI's identity from colliding with the user's identity.
+        
+        Args:
+            user_interaction: The user's current message.
+            conversation_history: Recent messages for pronoun/context resolution.
+        """
         from .knowledge_graph import EntityLinker, MULTI_VALUE_PREDICATES
         
         # Instantiate Linker with the embedding service instance from retriever
         entity_linker = EntityLinker(embedding_service=self.retriever.embedding_service)
         
-        facts = self.extractor.extract_facts(user_input=user_interaction)
+        # Build conversation context string from last 3 messages
+        context_str = ""
+        if conversation_history:
+            recent = conversation_history[-3:]  # Last 3 messages
+            context_lines = []
+            for msg in recent:
+                role = msg.get("role", "user").capitalize()
+                content = msg.get("content", "")[:200]  # Truncate long messages
+                context_lines.append(f"{role}: {content}")
+            context_str = "\n".join(context_lines)
+        
+        facts = self.extractor.extract_facts(user_input=user_interaction, conversation_context=context_str)
         
         for fact in facts:
             subject = fact.get("subject", "user").lower()
@@ -83,8 +104,21 @@ class MemoryManager:
             if not predicate or not obj:
                 continue
             
-            # CRITICAL FIX: Check if this is a multi-value predicate
-            # If so, check for exact duplicates but allow multiple different values
+            # ── ROUTE 1: Assistant identity facts → Authority Memory ──
+            # ONLY name and role go to authority memory. Everything else (specs, etc.)
+            # gets reclassified as user facts because hardware belongs to the user.
+            if subject == "assistant":
+                if self._is_ai_identity_fact(predicate):
+                    self._store_assistant_fact(predicate, obj)
+                    continue
+                else:
+                    # Reclassify: "assistant has_processor X" → "user has_processor X"
+                    logger.info(f"Reclassifying assistant fact to user: {predicate} {obj}")
+                    subject = "user"
+                    fact["subject"] = "user"
+            
+            # ── ROUTE 2: User/entity facts → Knowledge Graph + Qdrant ──
+            # Check if this is a multi-value predicate
             is_multi_value = predicate in MULTI_VALUE_PREDICATES
             
             if is_multi_value:
@@ -124,6 +158,37 @@ class MemoryManager:
                 text=payload["text"],
                 payload=payload
             )
+    
+    # Predicates that genuinely describe the AI's identity (not hardware)
+    _AI_IDENTITY_PREDICATES = {'has_name', 'is_named', 'preferred_name', 'name', 'called',
+                                'has_role', 'is_a', 'is_type', 'personality', 'tone'}
+    
+    def _is_ai_identity_fact(self, predicate: str) -> bool:
+        """Returns True if this predicate describes the AI's identity, not hardware."""
+        return predicate.lower() in self._AI_IDENTITY_PREDICATES
+    
+    def _store_assistant_fact(self, predicate: str, value: str):
+        """Route assistant identity facts (name/role ONLY) to Authority Memory.
+        
+        This keeps AI identity completely separated from user identity.
+        ONLY name and role predicates are stored here.
+        """
+        # Map predicates to authority memory keys
+        name_predicates = {'has_name', 'is_named', 'preferred_name', 'name', 'called'}
+        role_predicates = {'has_role', 'is_a', 'is_type'}
+        
+        if predicate in name_predicates:
+            key = "name"
+        elif predicate in role_predicates:
+            key = "role" 
+        else:
+            key = predicate
+        
+        changed = self.authority_memory.upsert_fact("assistant", key, value)
+        if changed:
+            logger.info(f"MemoryManager: AI Identity Updated -> assistant.{key} = {value}")
+        else:
+            logger.debug(f"MemoryManager: AI identity unchanged: assistant.{key} = {value}")
     
     def _find_existing_fact(self, subject: str, predicate: str, obj: str) -> Optional[Dict]:
         """Check if exact fact already exists to prevent duplicates."""

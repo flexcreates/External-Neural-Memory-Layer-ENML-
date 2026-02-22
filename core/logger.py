@@ -1,7 +1,6 @@
 
 import logging
 import sys
-import os
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 import json
@@ -12,49 +11,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 
-class MemoryLogger:
-    _instance = None
-
-    def __new__(cls, name="MemorySystem"):
-        if cls._instance is None:
-            cls._instance = super(MemoryLogger, cls).__new__(cls)
-            cls._instance._initialize_logger(name)
-        return cls._instance.logger
-
-    def _initialize_logger(self, name):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        # Formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - [%(levelname)s] - %(name)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-
-        # 1. Console Handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
-
-        # 2. File Handler (Rotating)
-        # Log up to 10MB per file, keep 5 backups
-        log_file = LOG_DIR / "memory_system.log"
-        file_handler = RotatingFileHandler(
-            log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
-        )
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(formatter)
-        self.logger.addHandler(file_handler)
-
-        # 3. JSON Lines Handler for structured auditing (Optional but good for parsing)
-        json_log_file = LOG_DIR / "audit.jsonl"
-        json_handler = logging.FileHandler(json_log_file, encoding='utf-8')
-        json_handler.setLevel(logging.INFO)
-        json_handler.setFormatter(JsonFormatter())
-        self.logger.addHandler(json_handler)
 
 class JsonFormatter(logging.Formatter):
+    """Outputs structured JSON lines for machine-parseable audit logs."""
     def format(self, record):
         log_record = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
@@ -67,10 +26,63 @@ class JsonFormatter(logging.Formatter):
         }
         return json.dumps(log_record)
 
-def get_logger(name=None):
-    """Factory function to get a logger with the standard configuration."""
-    # Use the root MemoryLogger configuration but return a child logger if name is provided
-    root_logger = MemoryLogger() # Ensure root is configured
+
+class _LoggerConfigurator:
+    """Singleton that configures the root 'MemorySystem' logger once."""
+    _initialized = False
+
+    @classmethod
+    def configure(cls):
+        if cls._initialized:
+            return
+        cls._initialized = True
+
+        root_logger = logging.getLogger("MemorySystem")
+        root_logger.setLevel(logging.DEBUG)
+
+        # Prevent duplicate handlers on reload
+        if root_logger.handlers:
+            return
+
+        # Formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - [%(levelname)s] - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        # 1. Console Handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+        # 2. File Handler (Rotating) — 10MB per file, 5 backups
+        log_file = LOG_DIR / "memory_system.log"
+        file_handler = RotatingFileHandler(
+            log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding='utf-8'
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+        # 3. JSON Lines Handler for structured auditing
+        json_log_file = LOG_DIR / "audit.jsonl"
+        json_handler = logging.FileHandler(json_log_file, encoding='utf-8')
+        json_handler.setLevel(logging.INFO)
+        json_handler.setFormatter(JsonFormatter())
+        root_logger.addHandler(json_handler)
+
+
+def get_logger(name: str = None) -> logging.Logger:
+    """Factory function to get a properly-named child logger.
+
+    All loggers are children of the 'MemorySystem' root logger, which
+    is configured once with console, file, and JSON-lines handlers.
+    Calling ``get_logger("core.extractor")`` returns
+    ``logging.getLogger("MemorySystem.core.extractor")``.
+    """
+    _LoggerConfigurator.configure()
+    root = logging.getLogger("MemorySystem")
     if name:
-        return root_logger.getChild(name)
-    return root_logger
+        return root.getChild(name)
+    return root

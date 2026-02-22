@@ -41,7 +41,9 @@ class Orchestrator:
         # but usually we want to pass the *previous* history + current input.
         
         # 1. Update Profile Immediately (Real-time Learning)
-        self.memory_manager.update_profile(user_input)
+        # Pass recent conversation context so the extractor can resolve pronouns
+        # like "its", "that", "this" (e.g., "its David" refers to the pet turtle)
+        self.memory_manager.update_profile(user_input, conversation_history=history)
 
         # 2. Build Context
         # For this implementation, we assume 'history' contains the conversation SO FAR.

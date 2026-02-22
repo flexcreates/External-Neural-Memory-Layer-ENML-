@@ -49,6 +49,7 @@ class JSONStorage:
     def load_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         Loads a session from a JSON file.
+        Searches recursively through YYYY/MM subdirectories.
         
         Args:
             session_id: The unique identifier for the session.
@@ -56,11 +57,17 @@ class JSONStorage:
         Returns:
             The session data dictionary, or None if not found.
         """
+        # First check flat path (backward compat)
         file_path = self.sessions_dir / f"{session_id}.json"
         
+        # If not found at root, search YYYY/MM subdirectories
         if not file_path.exists():
-            logger.warning(f"Session file {file_path} not found.")
-            return None
+            matches = list(self.sessions_dir.rglob(f"{session_id}.json"))
+            if matches:
+                file_path = matches[0]
+            else:
+                logger.warning(f"Session '{session_id}' not found in {self.sessions_dir}.")
+                return None
             
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -71,6 +78,6 @@ class JSONStorage:
 
     def list_sessions(self) -> List[str]:
         """
-        Returns a list of all stored session IDs.
+        Returns a list of all stored session IDs (searches recursively).
         """
-        return [f.stem for f in self.sessions_dir.glob("*.json")]
+        return [f.stem for f in self.sessions_dir.rglob("*.json")]

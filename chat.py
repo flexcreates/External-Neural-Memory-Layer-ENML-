@@ -94,8 +94,12 @@ def main():
             if user_input.startswith("/remember "):
                 fact = user_input.replace("/remember ", "", 1).strip()
                 if fact:
-                    orchestrator.memory_manager.add_memory(fact, metadata={"source": session_id, "type": "user_fact"})
-                    print(f"Memory saved: '{fact}'")
+                    try:
+                        orchestrator.memory_manager.update_profile(fact)
+                        print(f"✅ Memory saved: '{fact}'")
+                    except Exception as e:
+                        print(f"❌ Failed to save memory: {e}")
+                        logger.error(f"Remember command failed: {e}")
                 continue
 
             print("AI: ", end="", flush=True)

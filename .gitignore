@@ -1,30 +1,47 @@
-# Python Cache
+# ═══════════════════════════════════════════════════════════════════════
+# ENML — .gitignore
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── Python ────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
+*.egg-info/
+dist/
+build/
 
-# Environments
+# ── Virtual Environments ─────────────────────────────────────────────
 .env
 .venv/
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
 
-# Agent Memory (Do not commit DBs or Private data)
-/memory/
-/qdrant_storage/
-/logs/
-/data/
+# ── Memory & Data (user-specific, never commit) ──────────────────────
+memory/
+qdrant_storage/
+graph/
+logs/
+data/
 
-# IDE files
+# ── IDE & Editor ─────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.DS_Store
 
-# Temporary Files
+# ── Temporary / Build ────────────────────────────────────────────────
 *.log
 *.tmp
 *.bak
+*.gguf
+.pytest_cache/
+htmlcov/
+.coverage
+
+# ── OS Files ─────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store

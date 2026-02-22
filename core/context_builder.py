@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import re
 from .memory_manager import MemoryManager
 from .logger import get_logger
@@ -12,7 +12,8 @@ class ContextBuilder:
     def build_context(self, 
                       user_input: str, 
                       history: List[Dict[str, str]], 
-                      system_prompt: str = "You are a persistent AI assistant named Jarvis.") -> List[Dict[str, str]]:
+                      system_prompt: str = "You are a persistent AI assistant named Jarvis.",
+                      max_context_tokens: int = 2800) -> Tuple[List[Dict[str, str]], float]:
         """
         Builds the context and returns messages & temperature based on query mode.
         """
@@ -61,12 +62,31 @@ class ContextBuilder:
         
         messages = [{"role": "system", "content": effective_system_prompt}]
         
-        # 4. Append Conversation History
+        # 4. Append Conversation History (with token budget enforcement)
         SLIDING_WINDOW_COUNT = 20
         recent_history = history[-SLIDING_WINDOW_COUNT:] if len(history) > SLIDING_WINDOW_COUNT else history
-        messages.extend(recent_history)
+        
+        # Calculate remaining token budget after system prompt
+        system_tokens = self.estimate_tokens(effective_system_prompt)
+        user_tokens = self.estimate_tokens(user_input)
+        remaining_budget = max_context_tokens - system_tokens - user_tokens - 100  # 100 token safety margin
+        
+        # Trim history from oldest if it exceeds budget
+        trimmed_history = []
+        running_tokens = 0
+        for msg in reversed(recent_history):
+            msg_tokens = self.estimate_tokens(msg.get("content", ""))
+            if running_tokens + msg_tokens > remaining_budget:
+                break
+            trimmed_history.insert(0, msg)
+            running_tokens += msg_tokens
+        
+        messages.extend(trimmed_history)
         
         return messages, temperature
 
     def estimate_tokens(self, text: str) -> int:
+        """Rough token estimate: ~1.3 tokens per whitespace-delimited word."""
+        if not text:
+            return 0
         return int(len(text.split()) * 1.3)
