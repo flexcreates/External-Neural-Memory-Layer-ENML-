@@ -23,11 +23,17 @@ class JSONStorage:
         Returns:
             Path to the saved file.
         """
-        file_path = self.sessions_dir / f"{session_id}.json"
+        # Create YYYY/MM directory structure
+        now = datetime.now()
+        relative_path = Path(now.strftime("%Y/%m"))
+        save_dir = self.sessions_dir / relative_path
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        file_path = save_dir / f"{session_id}.json"
         
         session_data = {
             "session_id": session_id,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
             "messages": messages
         }
         

@@ -1,6 +1,30 @@
-.venv/
+# Python Cache
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
 .env
-*.pyc
-.pytest_cache/
-chroma_db_data/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Agent Memory (Do not commit DBs or Private data)
+memory/
+qdrant_storage/
+logs/
+data/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary Files
+*.log
+*.tmp
+*.bak

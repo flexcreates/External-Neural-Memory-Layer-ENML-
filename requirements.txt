@@ -1,5 +1,7 @@
-chromadb
+qdrant-client
 sentence-transformers
 python-dotenv
 pytest
 openai
+requests
+beautifulsoup4

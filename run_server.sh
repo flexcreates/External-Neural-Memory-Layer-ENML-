@@ -1,12 +1,21 @@
 #!/bin/bash
 
+# Load .env if it exists
+if [ -f .env ]; then
+    # This sources the .env file, making variables available.
+    # It assumes .env contains lines like VAR=value or export VAR=value
+    set -a # Automatically export all subsequent variables
+    . ./.env
+    set +a # Turn off automatic exporting
+fi
+
 # Configuration
-MODEL_PATH="/home/flex/Ai-Models/models/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf"
-LLAMA_SERVER="/home/flex/Ai-Models/llama.cpp/build/bin/llama-server"
+MODEL_PATH="${MODEL_PATH:-/path/to/your/model.gguf}"
+LLAMA_SERVER="${LLAMA_SERVER:-/path/to/llama.cpp/llama-server}"
 PORT=8080
 HOST="0.0.0.0"
-CONTEXT_SIZE=4096
-GPU_LAYERS=38
+CONTEXT_SIZE=3072
+GPU_LAYERS=32
 BATCH_SIZE=1024
 
 # Check if model exists

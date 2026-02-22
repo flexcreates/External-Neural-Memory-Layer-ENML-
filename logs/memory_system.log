@@ -1,8 +1,0 @@
-2026-02-19 21:09:37 - [INFO] - MemorySystem.src.storage.vector_storage - Initialized ChromaDB collection 'memory_collection' in /home/flex/Ai-Models/models/memory/data/vectors
-2026-02-19 21:09:37 - [INFO] - MemorySystem.ChatInterface - MemoryManager initialized successfully.
-2026-02-19 21:09:37 - [INFO] - MemorySystem.ChatInterface - Session ID: session_20260219_210937
-2026-02-19 21:11:43 - [INFO] - MemorySystem.src.storage.json_storage - Session session_20260219_210937 saved to /home/flex/Ai-Models/models/memory/data/sessions/session_20260219_210937.json
-2026-02-19 21:11:48 - [INFO] - MemorySystem.src.storage.vector_storage - Initialized ChromaDB collection 'memory_collection' in /home/flex/Ai-Models/models/memory/data/vectors
-2026-02-19 21:11:48 - [INFO] - MemorySystem.ChatInterface - MemoryManager initialized successfully.
-2026-02-19 21:11:48 - [INFO] - MemorySystem.ChatInterface - Session ID: session_20260219_211148
-2026-02-19 21:12:26 - [INFO] - MemorySystem.src.storage.json_storage - Session session_20260219_211148 saved to /home/flex/Ai-Models/models/memory/data/sessions/session_20260219_211148.json
