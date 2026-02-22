@@ -9,12 +9,17 @@ logger = get_logger(__name__)
 
 EXTRACTION_PROMPT = """You are a fact extraction system forming a Knowledge Graph from the user message.
 
-RULES:
-1. Output ONLY a pure JSON array. No markdown (` ```json `), no explanations, no prefix text.
-2. Format: [{{"subject": "user", "predicate": "snake_case_verb", "object": "clean_value", "fact_type": "factual_claim|preference|identity|general_knowledge", "confidence": 0.0}}]
-3. If no facts found, output exactly: []
-4. Subject should be the entity being described (usually "user" for personal info).
-5. Use snake_case for all keys. Provide a realistic confidence score between 0.0 and 1.0.
+CRITICAL RULES:
+1. Output ONLY a pure JSON array. No markdown, no explanations.
+2. Format: [{{"subject": "user", "predicate": "snake_case_verb", "object": "clean_value", "fact_type": "identity|preference|fact|interest|property", "confidence": 0.0-1.0}}]
+3. Use confidence scores realistically:
+   - 0.95-1.0: Direct explicit statements ("my name is Flex")
+   - 0.85-0.94: Clear but slightly indirect statements
+   - 0.70-0.84: Implied or contextual information
+   - <0.70: Uncertain or inferred
+4. If no facts found, output: []
+5. Subject is usually "user" for personal info. Use specific entities (e.g., "bruno", "lenovo_laptop") when appropriate.
+6. For multiple values (hobbies, interests), create separate facts with SAME subject and predicate.
 
 User message: {message}
 
@@ -30,7 +35,6 @@ class RobustJSONParser:
         ]
         
     def parse(self, raw_output: str) -> List[Dict[str, Any]]:
-        """Parse LLM output into a list of fact dictionaries."""
         if not raw_output or not isinstance(raw_output, str):
             return []
             
@@ -38,13 +42,12 @@ class RobustJSONParser:
         if not cleaned:
             return []
         
-        # Try each extractor in order
         for extractor in self.extractors:
             try:
                 result = extractor(cleaned)
                 if result is not None:
                     normalized = self._normalize_to_facts(result)
-                    if normalized:  # Only return if we got valid facts
+                    if normalized:
                         return normalized
             except Exception as e:
                 logger.debug(f"Extractor {extractor.__name__} failed: {e}")
@@ -54,18 +57,13 @@ class RobustJSONParser:
         return []
 
     def _extract_direct_json(self, text: str) -> Union[List, Dict, None]:
-        """Try parsing the entire string as JSON first."""
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             return None
 
     def _extract_code_block(self, text: str) -> Union[List, Dict, None]:
-        """Extract JSON from markdown code blocks."""
-        patterns = [
-            r'```json\s*([\s\S]*?)\s*```',
-            r'```\s*([\s\S]*?)\s*```',
-        ]
+        patterns = [r'```json\s*([\s\S]*?)\s*```', r'```\s*([\s\S]*?)\s*```']
         for pattern in patterns:
             matches = re.findall(pattern, text)
             for match in matches:
@@ -76,13 +74,10 @@ class RobustJSONParser:
         return None
 
     def _extract_json_array(self, text: str) -> Union[List, None]:
-        """Extract the first JSON array found in text."""
-        # Find array boundaries, handling nested braces
         start = text.find('[')
         if start == -1:
             return None
             
-        # Find matching closing bracket
         depth = 0
         end = start
         for i, char in enumerate(text[start:], start):
@@ -102,12 +97,10 @@ class RobustJSONParser:
         return None
 
     def _extract_json_object(self, text: str) -> Union[Dict, None]:
-        """Extract the first JSON object found in text."""
         start = text.find('{')
         if start == -1:
             return None
             
-        # Find matching closing brace
         depth = 0
         end = start
         for i, char in enumerate(text[start:], start):
@@ -127,75 +120,49 @@ class RobustJSONParser:
         return None
 
     def _normalize_to_facts(self, data: Any) -> List[Dict[str, Any]]:
-        """
-        Normalize various data structures into a list of fact dictionaries.
-        Returns empty list if data is invalid.
-        """
-        # None check
         if data is None:
             return []
         
-        # Already a list - validate each item
         if isinstance(data, list):
             valid_facts = []
             for item in data:
                 if isinstance(item, dict) and self._is_valid_fact(item):
                     valid_facts.append(self._sanitize_fact(item))
-                else:
-                    logger.debug(f"Skipping invalid list item: {item}")
             return valid_facts
         
-        # Single dictionary - wrap in list
         if isinstance(data, dict):
-            # Check for {"facts": [...]} wrapper
             if "facts" in data and isinstance(data["facts"], list):
                 return self._normalize_to_facts(data["facts"])
-            
-            # Single fact object
             if self._is_valid_fact(data):
                 return [self._sanitize_fact(data)]
-            
-            # Unknown dict structure
-            logger.debug(f"Unknown dict structure: {data}")
             return []
         
-        # String or other primitive - log and return empty
         if isinstance(data, (str, int, float, bool)):
-            logger.debug(f"Primitive value received instead of fact structure: {data}")
+            logger.debug(f"Primitive value received: {data}")
             return []
         
         return []
 
     def _is_valid_fact(self, item: Dict) -> bool:
-        """Check if dictionary has required fact fields."""
         if not isinstance(item, dict):
             return False
-        
-        # Must have at least subject and predicate
         has_subject = "subject" in item and isinstance(item["subject"], str)
         has_predicate = "predicate" in item and isinstance(item["predicate"], str)
-        
-        # Must have object or object_id
         has_object = "object" in item or "object_id" in item or "object_literal" in item
-        
         return has_subject and has_predicate and has_object
 
     def _sanitize_fact(self, fact: Dict) -> Dict[str, Any]:
-        """Ensure fact has all required fields with proper types."""
         sanitized = {
             "subject": str(fact.get("subject", "user")),
             "predicate": str(fact.get("predicate", "has_property")),
             "object": str(fact.get("object", fact.get("object_literal", fact.get("object_id", "unknown")))),
             "confidence": float(fact.get("confidence", 0.8)),
-            "fact_type": str(fact.get("fact_type", "factual_claim")),
+            "fact_type": str(fact.get("fact_type", "fact")),
         }
-        
-        # Optional fields
         if "subject_id" in fact:
             sanitized["subject_id"] = str(fact["subject_id"])
         if "object_id" in fact:
             sanitized["object_id"] = str(fact["object_id"])
-            
         return sanitized
 
 
@@ -204,22 +171,22 @@ class MemoryExtractor:
         self.client = OpenAI(base_url=f"{LLAMA_SERVER_URL}/v1", api_key="sk-proj-no-key")
         self.parser = RobustJSONParser()
         
+        # FIXED: Lowered thresholds to realistic values
+        # The LLM rarely gives 0.95+ confidence, so 0.80 is more practical for identity
         self.thresholds = {
-            'factual_claim': 0.85,    
-            'preference': 0.75,         
-            'general_knowledge': 0.9, 
-            'identity': 0.95,          
+            'identity': 0.80,      # Was 0.95 - too high, caused name rejection
+            'preference': 0.70,    # Was 0.75 - OK but lowered for flexibility  
+            'fact': 0.75,          # Was 0.85 - too high for general facts
+            'interest': 0.70,      # New category for hobbies/interests
+            'property': 0.75,      # For PC specs, attributes
+            'general_knowledge': 0.80,  # Was 0.90
         }
         
     def extract_facts(self, user_input: str) -> List[Dict[str, Any]]:
-        """
-        Extract facts from user input with full error handling.
-        Returns empty list if extraction fails.
-        """
         if not user_input or not isinstance(user_input, str):
             return []
             
-        logger.debug(f"MemoryExtractor: Extracting facts from '{user_input[:100]}...'")
+        logger.debug(f"Extracting facts from: '{user_input[:100]}...'")
         
         try:
             prompt = EXTRACTION_PROMPT.format(message=user_input)
@@ -227,131 +194,93 @@ class MemoryExtractor:
                 model="Meta-Llama-3-8B-Instruct",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=500  # Increased for complex facts
+                max_tokens=500
             )
             
             raw_content = response.choices[0].message.content
             if not raw_content:
-                logger.warning("MemoryExtractor: Empty LLM response")
+                logger.warning("Empty LLM response")
                 return []
                 
             raw_content = raw_content.strip()
-            logger.debug(f"MemoryExtractor: Raw LLM output: {raw_content[:200]}...")
+            logger.debug(f"Raw LLM output: {raw_content[:200]}...")
             
-            # Parse with robust parser
             facts = self.parser.parse(raw_content)
             
             if not facts:
-                logger.info(f"MemoryExtractor: No facts extracted from: {raw_content[:100]}...")
+                logger.info(f"No facts extracted from: {raw_content[:100]}...")
                 return []
             
-            # Verify confidence thresholds
             verified_facts = []
             for fact in facts:
                 try:
-                    fact_type = fact.get("fact_type", "factual_claim")
+                    fact_type = fact.get("fact_type", "fact").lower()
                     confidence = float(fact.get("confidence", 0.8))
-                    threshold = self.thresholds.get(fact_type, 0.85)
-
+                    
+                    # Map generic types to specific thresholds
+                    threshold = self._get_threshold(fact_type, fact)
+                    
                     if confidence >= threshold:
                         verified_facts.append(fact)
-                        logger.debug(f"MemoryExtractor: Accepted fact: {fact}")
+                        logger.debug(f"✅ Accepted: {fact['subject']} {fact['predicate']} {fact['object']} (conf: {confidence:.2f} >= {threshold})")
                     else:
-                        logger.info(f"MemoryExtractor: Rejected (confidence {confidence:.2f} < {threshold}): {fact['predicate']}")
+                        logger.info(f"❌ Rejected: {fact['predicate']} (conf: {confidence:.2f} < {threshold})")
                         
                 except (TypeError, ValueError) as e:
-                    logger.warning(f"MemoryExtractor: Invalid fact structure: {fact}, error: {e}")
+                    logger.warning(f"Invalid fact structure: {fact}, error: {e}")
                     continue
                     
-            logger.info(f"MemoryExtractor: Extracted {len(verified_facts)}/{len(facts)} facts")
+            logger.info(f"Extracted {len(verified_facts)}/{len(facts)} facts")
             return verified_facts
             
         except Exception as e:
-            logger.error(f"MemoryExtractor: Extraction failed: {type(e).__name__}: {e}")
+            logger.error(f"Extraction failed: {type(e).__name__}: {e}")
             return []
     
-    def extract_with_context(self, user_input: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Enhanced extraction with conversation context.
-        """
-        # Build context-aware prompt
-        context_str = ""
-        if context.get("user_name"):
-            context_str += f"\nUser's name is {context['user_name']}."
-        if context.get("recent_topics"):
-            context_str += f"\nRecent topics: {', '.join(context['recent_topics'][:3])}."
+    def _get_threshold(self, fact_type: str, fact: Dict) -> float:
+        """Dynamic threshold based on fact type and content."""
+        # Check for identity-related predicates regardless of declared type
+        identity_predicates = ['has_name', 'is_named', 'preferred_name', 'legal_name', 'has_pet', 'pet_name']
+        if fact.get('predicate', '') in identity_predicates:
+            return self.thresholds['identity']
         
-        enhanced_prompt = EXTRACTION_PROMPT.replace(
-            "User message: {message}",
-            f"{context_str}\nUser message: {{message}}"
-        )
-        
-        try:
-            prompt = enhanced_prompt.format(message=user_input)
-            response = self.client.chat.completions.create(
-                model="Meta-Llama-3-8B-Instruct",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=500
-            )
+        # Check for interests/hobbies
+        interest_predicates = ['has_interest', 'has_hobby', 'likes', 'enjoys']
+        if fact.get('predicate', '') in interest_predicates:
+            return self.thresholds['interest']
             
-            raw_content = response.choices[0].message.content.strip()
-            return self.parser.parse(raw_content)
-            
-        except Exception as e:
-            logger.error(f"MemoryExtractor: Context extraction failed: {e}")
-            return self.extract_facts(user_input)  # Fallback to basic
+        return self.thresholds.get(fact_type, 0.75)
 
 
-# Test function for validation
+# Test function
 def test_extractor():
-    """Run diagnostic tests on the extractor."""
     extractor = MemoryExtractor()
     
     test_cases = [
-        ("Simple greeting", "hi how are you brother"),
         ("Identity statement", "my name is Flex"),
-        ("Complex specs", "my pc specs are lenovo loq 12450HX i5 processor rtx 3050 6gb"),
-        ("Empty input", ""),
+        ("Pet info", "my pet dog name is bruno"),
+        ("PC specs", "my pc specs are lenovo loq 12450HX i5 processor rtx 3050"),
+        ("Multiple interests", "i like vibe coding and creating art"),
         ("Question", "what is my name?"),
     ]
     
-    print("=" * 60)
+    print("=" * 70)
     print("MEMORY EXTRACTOR TESTS")
-    print("=" * 60)
+    print("=" * 70)
     
     for name, test_input in test_cases:
         print(f"\n🧪 Test: {name}")
-        print(f"   Input: '{test_input[:50]}...' ")
+        print(f"   Input: '{test_input}'")
         
         try:
             facts = extractor.extract_facts(test_input)
             print(f"   ✅ Extracted {len(facts)} facts")
-            for i, fact in enumerate(facts[:2]):  # Show first 2
-                print(f"      {i+1}. {fact.get('subject')} {fact.get('predicate')} {fact.get('object')} (conf: {fact.get('confidence')})")
+            for i, fact in enumerate(facts):
+                print(f"      {i+1}. [{fact.get('fact_type')}] {fact.get('subject')} {fact.get('predicate')} {fact.get('object')} (conf: {fact.get('confidence')})")
         except Exception as e:
             print(f"   ❌ Error: {e}")
     
-    print("\n" + "=" * 60)
-    print("PARSER UNIT TESTS")
-    print("=" * 60)
-    
-    parser = RobustJSONParser()
-    parser_tests = [
-        ('Direct array', '[{"subject": "user", "predicate": "has_name", "object": "Flex", "confidence": 1.0}]'),
-        ('Markdown code block', '```json\n[{"subject": "user", "predicate": "has_name", "object": "Flex", "confidence": 1.0}]\n```'),
-        ('Plain code block', '```\n[{"subject": "user", "predicate": "has_name", "object": "Flex", "confidence": 1.0}]\n```'),
-        ('Empty array', '[]'),
-        ('Single object', '{"subject": "user", "predicate": "has_name", "object": "Flex", "confidence": 1.0}'),
-        ('Wrapped object', '{"facts": [{"subject": "user", "predicate": "has_name", "object": "Flex", "confidence": 1.0}]}'),
-        ('Invalid string', 'not json'),
-        ('Empty string', ''),
-    ]
-    
-    for name, test_input in parser_tests:
-        result = parser.parse(test_input)
-        status = "✅" if result is not None else "⚠️"
-        print(f"{status} {name}: {len(result) if isinstance(result, list) else 'N/A'} facts")
+    print("\n" + "=" * 70)
 
 if __name__ == "__main__":
     test_extractor()
