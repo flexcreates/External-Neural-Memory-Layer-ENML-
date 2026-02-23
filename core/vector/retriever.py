@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 from core.vector.qdrant_client import QdrantManager
 from core.vector.embeddings import EmbeddingService
 from qdrant_client.http import models
@@ -102,6 +103,26 @@ class Retriever:
             
             # Base Vector Semantic Score (0.0 to 1.0)
             score = r.score 
+            
+            # Recency Boost (For context-dependent queries like "this project")
+            timestamp_str = payload.get("timestamp")
+            if timestamp_str:
+                try:
+                    ts = timestamp_str.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(ts)
+                    if dt.tzinfo is None:
+                        age_seconds = (datetime.now() - dt).total_seconds()
+                    else:
+                        age_seconds = (datetime.now(dt.tzinfo) - dt).total_seconds()
+                    
+                    if age_seconds < 1800:       # < 30 mins
+                        score += 0.08
+                    elif age_seconds < 7200:     # < 2 hours
+                        score += 0.04
+                    elif age_seconds < 86400:    # < 1 day
+                        score += 0.02
+                except Exception:
+                    pass
             
             # Entity keyword matching boost
             subject = payload.get("subject", "").lower()

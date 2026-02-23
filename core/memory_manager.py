@@ -3,7 +3,8 @@ from pathlib import Path
 
 from .config import (CONVERSATIONS_DIR, QDRANT_CONVERSATION_COLLECTION, 
                      QDRANT_PROFILE_COLLECTION, QDRANT_KNOWLEDGE_COLLECTION,
-                     QDRANT_DOCUMENT_COLLECTION)
+                     QDRANT_DOCUMENT_COLLECTION, QDRANT_PROJECT_COLLECTION,
+                     QDRANT_RESEARCH_COLLECTION)
 from .storage.json_storage import JSONStorage
 from .vector.retriever import Retriever
 from .router.query_router import QueryRouter
@@ -50,35 +51,62 @@ class MemoryManager:
         
         logger.info(f"[ROUTE] Query '{query[:60]}' → collection: {collection}")
         
-        # ── Search document_collection for LLM-generated summaries ──
+        # ── Search document summaries from appropriate collection(s) ──
         scored_items = []
-        try:
-            summary_results = self.retriever.search(
-                QDRANT_DOCUMENT_COLLECTION, query, limit=5
-            )
-            for r in summary_results:
-                payload = r.get("payload", {})
-                score = r.get("score", 0)
-                text = payload.get("text", "")
-                heading = payload.get("heading", "")
+        
+        # Content collections that hold summaries
+        content_collections = [
+            QDRANT_PROJECT_COLLECTION, 
+            QDRANT_RESEARCH_COLLECTION, 
+            QDRANT_DOCUMENT_COLLECTION
+        ]
+        
+        # Determine which collections to search for summaries
+        search_collections = []
+        if collection in content_collections:
+            # Search the specifically routed one first
+            search_collections = [collection] + [c for c in content_collections if c != collection]
+        else:
+            # If routed to knowledge/conversation, still do a light search across content for context
+            search_collections = content_collections
+            
+        for c in search_collections:
+            try:
+                summary_results = self.retriever.search(c, query, limit=10)
+                for r in summary_results:
+                    payload = r.get("payload", {})
+                    score = r.get("score", 0)
+                    text = payload.get("text", "")
+                    heading = payload.get("heading", "")
+                    
+                    if score >= MIN_RETRIEVAL_CONFIDENCE and text:
+                        scored_items.append({
+                            "text": text,
+                            "heading": heading,
+                            "score": round(score, 3),
+                            "type": "summary",
+                            "source_collection": c
+                        })
+            except Exception as e:
+                logger.debug(f"[RETRIEVE] Document summary search failed on {c}: {e}")
                 
-                if score >= MIN_RETRIEVAL_CONFIDENCE and text:
-                    scored_items.append({
-                        "text": text,
-                        "heading": heading,
-                        "score": round(score, 3),
-                        "type": "summary",
-                    })
-        except Exception as e:
-            logger.debug(f"[RETRIEVE] Document summary search failed: {e}")
+        # Deduplicate summaries just in case
+        seen_summaries = set()
+        unique_summaries = []
+        for item in scored_items:
+            if item["text"] not in seen_summaries:
+                seen_summaries.add(item["text"])
+                unique_summaries.append(item)
+        scored_items = unique_summaries
         
         summary_count = len(scored_items)
         if summary_count:
-            logger.info(f"[RETRIEVE] Found {summary_count} document summaries (scores: {[s['score'] for s in scored_items]})")
+            logger.info(f"[RETRIEVE] Found {summary_count} document summaries across collections (scores: {[s['score'] for s in scored_items]})")
         
-        # ── Search routed collection for facts ──
+        # ── Search for facts in Knowledge Collection ──
+        # Facts are always strictly in QDRANT_KNOWLEDGE_COLLECTION
         fact_threshold = MIN_RETRIEVAL_CONFIDENCE + 0.05  # Slightly stricter for sparse facts
-        results = self.retriever.search(collection, query, limit=n_results)
+        results = self.retriever.search(QDRANT_KNOWLEDGE_COLLECTION, query, limit=n_results)
         for r in results:
             payload = r.get("payload", {})
             score = r.get("score", 0)

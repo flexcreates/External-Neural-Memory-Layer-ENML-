@@ -49,7 +49,11 @@ class QueryRouter:
                 return QDRANT_KNOWLEDGE_COLLECTION
             
         # ── Priority 3: Project/code routing ──
-        project_keywords = ["codebase", "implemented", "script", ".py", "function", "class", "module", "source code", "git"]
+        project_keywords = [
+            "codebase", "implemented", "script", ".py", "function", "class", "module", 
+            "source code", "git", "project", "app", "application", "repo", "repository", 
+            "system", "architecture"
+        ]
         for kw in project_keywords:
             if kw in query_lower:
                 logger.info(f"[ROUTE] Matched project keyword '{kw}' → {QDRANT_PROJECT_COLLECTION}")
@@ -57,9 +61,12 @@ class QueryRouter:
             
         # ── Priority 4: Research routing ──
         # More specific patterns to avoid hijacking document queries
-        research_keywords = ["explain the concept", "how does a", "what is a", "what is the",
-                            "documentation for", "article about", "theory of", "paper on",
-                            "research on", "study about"]
+        research_keywords = [
+            "explain the concept", "how does a", "what is a", "what is the",
+            "documentation for", "article about", "theory of", "paper on",
+            "research on", "study about", "research", "paper", "study", 
+            "framework", "concept", "article"
+        ]
         for kw in research_keywords:
             if kw in query_lower:
                 logger.info(f"[ROUTE] Matched research keyword '{kw}' → {QDRANT_RESEARCH_COLLECTION}")

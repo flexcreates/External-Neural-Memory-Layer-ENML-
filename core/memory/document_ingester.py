@@ -17,6 +17,7 @@ from openai import OpenAI
 from core.config import (
     MAX_DOCUMENT_FACTS, MAX_FACTS_PER_EXTRACTION,
     QDRANT_KNOWLEDGE_COLLECTION, QDRANT_DOCUMENT_COLLECTION,
+    QDRANT_PROJECT_COLLECTION, QDRANT_RESEARCH_COLLECTION,
     MAX_DOCUMENT_SUMMARIES, LLAMA_SERVER_URL
 )
 from core.logger import get_logger
@@ -52,6 +53,22 @@ Section content:
 {content}
 
 Detailed summary:"""
+
+
+# ── Classification prompt template ──
+_CLASSIFY_PROMPT = """Analyze the following document snippet and classify its primary nature.
+
+Categories:
+- "project": Codebase documentation, software architecture, technical READMEs, API docs, system specifications. 
+- "research": Academic papers, theoretical articles, study findings, conceptual explainers, historical essays.
+- "document": General text, chat logs, unstructured notes, or anything that doesn't strongly fit the above.
+
+Output ONLY the exact category name ("project", "research", or "document") in lowercase. No other text.
+
+Snippet:
+{content}
+
+Category:"""
 
 
 class DocumentIngester:
@@ -111,6 +128,38 @@ class DocumentIngester:
         except Exception as e:
             logger.error(f"[STORE] LLM summarization failed for '{heading[:40]}': {e}")
             return None
+            
+    def _classify_document(self, text: str) -> str:
+        """Classify the entire document to determine which Qdrant collection to store its summaries in."""
+        snippet = text[:2000] # Use first 2000 chars for classification
+        prompt = _CLASSIFY_PROMPT.format(content=snippet)
+        
+        try:
+            response = self.llm_client.chat.completions.create(
+                model="Meta-Llama-3-8B-Instruct",
+                messages=[
+                    {"role": "system", "content": "You are a precise document classifier. Output only one word."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.0,
+                max_tokens=10,
+                stream=False
+            )
+            category = response.choices[0].message.content.strip().lower()
+            
+            # Clean LLM output just in case
+            category = re.sub(r'[^a-z]', '', category)
+            
+            if category == "project":
+                return QDRANT_PROJECT_COLLECTION
+            elif category == "research":
+                return QDRANT_RESEARCH_COLLECTION
+            else:
+                return QDRANT_DOCUMENT_COLLECTION
+                
+        except Exception as e:
+            logger.error(f"[CLASSIFY] LLM classification failed, defaulting to document: {e}")
+            return QDRANT_DOCUMENT_COLLECTION
     
     def ingest(self, text: str, source_label: str = "pasted_document") -> Dict[str, Any]:
         """Ingest a large document through the summarization pipeline.
@@ -123,6 +172,10 @@ class DocumentIngester:
             Summary dict: {sections, summaries_stored, facts_extracted, skipped_noise, source}
         """
         logger.info(f"Starting document ingestion: {len(text)} chars, source={source_label}")
+        
+        # 0. Classify document to determine storage destination
+        target_collection = self._classify_document(text)
+        logger.info(f"Document classified for storage in: {target_collection}")
         
         # 1. Split into sections
         sections = self._split_into_sections(text)
@@ -169,7 +222,7 @@ class DocumentIngester:
                     }
                     
                     self.retriever.add_memory(
-                        collection=QDRANT_DOCUMENT_COLLECTION,
+                        collection=target_collection,
                         text=searchable_text,
                         payload=summary_payload,
                         memory_id=str(uuid.uuid4()),

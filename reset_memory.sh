@@ -45,8 +45,7 @@ echo "  • ${MEMORY_ROOT}/projects/*"
 echo "  • ${MEMORY_ROOT}/research/*"
 echo "  • ${MEMORY_ROOT}/authority/profile.json"
 echo "  • ${MEMORY_ROOT}/graph/*"
-echo "  • Qdrant collections: ${QDRANT_KNOWLEDGE}, ${QDRANT_CONVERSATION},"
-echo "    ${QDRANT_RESEARCH}, ${QDRANT_PROJECT}, ${QDRANT_PROFILE}"
+echo "  • Qdrant Docker container and all local Qdrant storage files"
 echo ""
 read -p "Are you sure you want to proceed? (y/N): " confirm
 
@@ -97,27 +96,19 @@ cat > "$PROFILE_FILE" << EOJSON
 EOJSON
 echo -e "  ${GREEN}✓${NC} Reset authority profile (AI Name: ${AI_NAME})"
 
-# Reset Qdrant collections
-echo -e "\n${BOLD}Resetting Qdrant collections...${NC}"
-if [ -f ".venv/bin/python3" ]; then
-    .venv/bin/python3 << EOPY
-try:
-    from qdrant_client import QdrantClient
-    client = QdrantClient(url='${QDRANT_URL}')
-    collections = ['${QDRANT_KNOWLEDGE}', '${QDRANT_CONVERSATION}', '${QDRANT_RESEARCH}', '${QDRANT_PROJECT}', '${QDRANT_PROFILE}']
-    for c in collections:
-        try:
-            client.delete_collection(collection_name=c)
-            print(f'  ✓ Dropped {c}')
-        except Exception:
-            print(f'  - {c} (not found, skipping)')
-except ImportError:
-    print('  ⚠ qdrant-client not installed. Skipping.')
-except Exception as e:
-    print(f'  ⚠ Qdrant connection failed: {e}')
-EOPY
-else
-    echo -e "  ${YELLOW}⚠${NC} .venv not found. Skipping Qdrant reset."
+# Hard reset Qdrant storage
+echo -e "\n${BOLD}Hard-resetting Qdrant vector database...${NC}"
+CONTAINER_NAME="enml-qdrant"
+if sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Eq "^${CONTAINER_NAME}\$"; then
+    echo "  [Info] Stopping and removing Qdrant container..."
+    sudo docker stop "$CONTAINER_NAME" > /dev/null
+    sudo docker rm "$CONTAINER_NAME" > /dev/null
+    echo -e "  ${GREEN}✓${NC} Removed Qdrant container"
+fi
+
+if [ -d "qdrant_storage" ]; then
+    sudo rm -rf qdrant_storage/* 2>/dev/null || true
+    echo -e "  ${GREEN}✓${NC} Deleted all Qdrant local storage data"
 fi
 
 # Clean Python caches

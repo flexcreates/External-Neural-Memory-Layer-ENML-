@@ -77,8 +77,12 @@ User Query ──► ContextBuilder.build_context()
                     │
                     ├──► Retriever.search()
                     │    ├── Vector similarity (2× limit)
+                    │    ├── Recency boost (+0.08 for <30m, for context queries)
                     │    ├── Entity re-ranking (+0.2 subject, +0.1 predicate)
                     │    └── Status filter (exclude superseded)
+                    │
+                    ├──► Fallback Search
+                    │    └── If primary collection yields 0 results, fallback to other content collections
                     │
                     ├──► AuthorityMemory.get_injected_prompt()
                     │    └── Always inject identity + system specs
@@ -106,8 +110,9 @@ System Prompt + History + User Message ──► LLM (streaming)
 |---|---|---|
 | `knowledge_collection` | `{subject, predicate, object, confidence, status, timestamp, text}` | Auto-extraction |
 | `conversation_collection` | `{type, session_id, importance}` | `ingest_conversation.py` |
-| `research_collection` | `{type, source/source_url, topic, chunk_index}` | `ingest_research.py`, `WebIngestor` |
-| `project_collection` | `{type, file, module, language, chunk_index}` | `ingest_project.py` |
+| `research_collection` | `{type, source/source_url, topic, chunk_index}` | `ingest_research.py`, `WebIngestor`, `document_ingester.py` |
+| `project_collection` | `{type, file, module, language, chunk_index}` | `ingest_project.py`, `document_ingester.py` |
+| `document_collection` | `{type, heading, timestamp, text}` | `document_ingester.py` |
 | `profile_collection` | `{type, ...}` | Reserved for future use |
 
 ### JSON Files

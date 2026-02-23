@@ -84,8 +84,8 @@ Every message is analyzed by the LLM to extract semantic triples:
 Paste large documents (README files, documentation, code) and ENML handles them intelligently:
 - **Auto-detection**: inputs over 500 chars or with markdown structure are classified as documents
 - **Section chunking**: documents split by headings/paragraphs for focused processing
-- **LLM-powered summarization**: each section is summarized by the LLM, preserving all names, numbers, file paths, and technical details
-- **Dual-layer storage**: summaries stored in `document_collection` for rich retrieval + facts extracted into `knowledge_collection`
+- **LLM-powered categorization & summarization**: each section is summarized by the LLM, and the document is classified into `project`, `research`, or `document` categories.
+- **Categorized dual-layer storage**: summaries stored in categorized collections for domain-specific retrieval + facts extracted into `knowledge_collection`
 - **Confidence-scored retrieval**: retrieved items carry semantic similarity scores; only items above threshold are injected
 - **Noise filtering**: code blocks, ASCII art, URLs, and file paths are stripped before processing
 - **Caps**: max 15 summaries + 25 facts per document to prevent memory explosion
@@ -107,7 +107,9 @@ A beautiful dark-themed chat interface at `http://localhost:5000`:
 The context builder searches Qdrant for relevant memories and injects them into the system prompt — so the AI always has context about you.
 - **Confidence scoring**: every retrieved item carries a semantic similarity score
 - **Threshold filtering**: only items above minimum confidence (0.30) are injected
-- **Hybrid retrieval**: always searches both document summaries and knowledge facts
+- **Hybrid & Fallback retrieval**: queries target specific domains (e.g., project code), falling back to other document collections if needed, alongside knowledge facts
+- **Recency boosting**: recently ingested documents receive a score boost, helping the AI understand context-dependent phrases like "explain this project"
+- **Memory depth**: retrieves up to 10 document summary chunks to reconstruct full context
 - **Memory cap**: max 8 scored items injected per query
 - **Deduplication**: redundant memories are filtered before injection
 - **Token budget**: 6000-token context window for rich responses
