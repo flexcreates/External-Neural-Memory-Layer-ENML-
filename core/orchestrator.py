@@ -62,6 +62,9 @@ class Orchestrator:
         full_context.append({"role": "user", "content": user_input})
         
         # 4. Call LLM
+        logger.info(f"[LLM] Calling model=Meta-Llama-3-8B-Instruct, temp={temperature}, messages={len(full_context)}")
+        if full_context and full_context[0].get("role") == "system":
+            logger.debug(f"[LLM] System prompt preview: {full_context[0]['content'][:400]}...")
         try:
             stream = self.client.chat.completions.create(
                 model="Meta-Llama-3-8B-Instruct",

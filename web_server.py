@@ -137,7 +137,7 @@ def chat():
                 result = doc_ingester.ingest(user_message, source_label="web_pasted_document")
                 result_msg = json.dumps({
                     "type": "status",
-                    "content": f"✅ Document ingested: {result['sections']} sections, {result['facts_extracted']} facts extracted"
+                    "content": f"✅ Document ingested: {result['sections']} sections, {result.get('summaries_stored', 0)} summaries, {result['facts_extracted']} facts extracted"
                 })
                 yield f"data: {result_msg}\n\n"
             except Exception as e:
@@ -215,6 +215,107 @@ def save_session(session_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/debug/memories")
+def debug_memories():
+    """Debug endpoint: list all stored facts in Qdrant knowledge_collection.
+    
+    Usage: GET http://localhost:5000/api/debug/memories
+    """
+    try:
+        from core.config import QDRANT_KNOWLEDGE_COLLECTION, QDRANT_DOCUMENT_COLLECTION
+        
+        # Get facts from knowledge_collection
+        facts_points, _ = orchestrator.memory_manager.retriever.qdrant_manager.client.scroll(
+            collection_name=QDRANT_KNOWLEDGE_COLLECTION,
+            limit=100,
+            with_payload=True
+        )
+        facts = []
+        for p in facts_points:
+            payload = p.payload or {}
+            facts.append({
+                "id": str(p.id),
+                "subject": payload.get("subject", ""),
+                "predicate": payload.get("predicate", ""),
+                "object": payload.get("object", ""),
+                "status": payload.get("status", ""),
+                "text": payload.get("text", ""),
+                "timestamp": payload.get("timestamp", ""),
+            })
+        
+        # Get chunks from document_collection
+        chunk_points, _ = orchestrator.memory_manager.retriever.qdrant_manager.client.scroll(
+            collection_name=QDRANT_DOCUMENT_COLLECTION,
+            limit=100,
+            with_payload=True
+        )
+        chunks = []
+        for p in chunk_points:
+            payload = p.payload or {}
+            chunks.append({
+                "id": str(p.id),
+                "heading": payload.get("heading", ""),
+                "text_preview": payload.get("text", "")[:200],
+                "char_count": payload.get("char_count", 0),
+                "source_label": payload.get("source_label", ""),
+            })
+        
+        return jsonify({
+            "total_facts": len(facts),
+            "total_chunks": len(chunks),
+            "knowledge_collection": QDRANT_KNOWLEDGE_COLLECTION,
+            "document_collection": QDRANT_DOCUMENT_COLLECTION,
+            "facts": facts[:20],
+            "chunks": chunks[:20],
+        })
+    except Exception as e:
+        logger.error(f"Debug memories endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/debug/retrieve")
+def debug_retrieve():
+    """Debug endpoint: run full retrieval pipeline for a query without calling LLM.
+    
+    Usage: GET http://localhost:5000/api/debug/retrieve?q=what+is+my+name
+    """
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "Missing 'q' query parameter"}), 400
+    
+    try:
+        # Step 1: Route
+        collection = orchestrator.memory_manager.query_router.route(query)
+        
+        # Step 2: Retrieve
+        retrieval_data = orchestrator.memory_manager.retrieve_context(query, n_results=10)
+        
+        # Step 3: Build context (without LLM call)
+        system_prompt = f"You are {AI_NAME} {AI_HINT}.\nKeep answers concise and efficient.\n"
+        full_context, temperature = orchestrator.context_builder.build_context(
+            query, [], system_prompt=system_prompt
+        )
+        
+        # Extract system prompt from built context
+        sys_prompt_content = ""
+        if full_context and full_context[0].get("role") == "system":
+            sys_prompt_content = full_context[0]["content"]
+        
+        return jsonify({
+            "query": query,
+            "routed_collection": collection,
+            "retrieval_type": retrieval_data["type"],
+            "documents": retrieval_data["documents"],
+            "document_count": len(retrieval_data["documents"]),
+            "temperature": temperature,
+            "system_prompt_preview": sys_prompt_content[:500],
+            "system_prompt_length": len(sys_prompt_content),
+        })
+    except Exception as e:
+        logger.error(f"Debug retrieve endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Startup ──────────────────────────────────────────────────────────────
 
 def init_app():
@@ -222,7 +323,7 @@ def init_app():
     global orchestrator, doc_ingester
     print("Initializing ENML Orchestrator for Web Server...")
     orchestrator = Orchestrator()
-    doc_ingester = DocumentIngester(orchestrator.memory_manager)
+    doc_ingester = DocumentIngester(orchestrator.memory_manager, llm_client=orchestrator.client)
     print(f"✅ ENML Web Server ready — Orchestrator initialized")
 
 

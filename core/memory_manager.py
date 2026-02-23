@@ -1,7 +1,9 @@
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from .config import CONVERSATIONS_DIR, QDRANT_CONVERSATION_COLLECTION, QDRANT_PROFILE_COLLECTION, QDRANT_KNOWLEDGE_COLLECTION
+from .config import (CONVERSATIONS_DIR, QDRANT_CONVERSATION_COLLECTION, 
+                     QDRANT_PROFILE_COLLECTION, QDRANT_KNOWLEDGE_COLLECTION,
+                     QDRANT_DOCUMENT_COLLECTION)
 from .storage.json_storage import JSONStorage
 from .vector.retriever import Retriever
 from .router.query_router import QueryRouter
@@ -31,30 +33,98 @@ class MemoryManager:
         """Saves a full conversation session."""
         return self.json_storage.save_session(session_id, messages)
 
-    def retrieve_context(self, query: str, n_results: int = 3) -> dict:
-        """Routes the query and retrieves specific domain context."""
-        collection = self.query_router.route(query)
+    def retrieve_context(self, query: str, n_results: int = 5) -> dict:
+        """Confidence-scored hybrid retrieval: searches summaries + facts, returns scored items."""
+        from .config import MIN_RETRIEVAL_CONFIDENCE
         
-        # Step 2: Force profile collection for self-referential queries
+        collection = self.query_router.route(query)
+        original_collection = collection
+        
+        # Force knowledge collection for self-referential queries
         query_lower = query.lower()
         self_words = ["my", "i", "me", "i'm"]
         if collection == QDRANT_CONVERSATION_COLLECTION:
             if any(f" {w} " in f" {query_lower} " or query_lower.startswith(w) for w in self_words):
                 collection = QDRANT_KNOWLEDGE_COLLECTION
-            
+                logger.info(f"[ROUTE] Self-referential override: {original_collection} → {collection}")
+        
+        logger.info(f"[ROUTE] Query '{query[:60]}' → collection: {collection}")
+        
+        # ── Search document_collection for LLM-generated summaries ──
+        scored_items = []
+        try:
+            summary_results = self.retriever.search(
+                QDRANT_DOCUMENT_COLLECTION, query, limit=5
+            )
+            for r in summary_results:
+                payload = r.get("payload", {})
+                score = r.get("score", 0)
+                text = payload.get("text", "")
+                heading = payload.get("heading", "")
+                
+                if score >= MIN_RETRIEVAL_CONFIDENCE and text:
+                    scored_items.append({
+                        "text": text,
+                        "heading": heading,
+                        "score": round(score, 3),
+                        "type": "summary",
+                    })
+        except Exception as e:
+            logger.debug(f"[RETRIEVE] Document summary search failed: {e}")
+        
+        summary_count = len(scored_items)
+        if summary_count:
+            logger.info(f"[RETRIEVE] Found {summary_count} document summaries (scores: {[s['score'] for s in scored_items]})")
+        
+        # ── Search routed collection for facts ──
+        fact_threshold = MIN_RETRIEVAL_CONFIDENCE + 0.05  # Slightly stricter for sparse facts
         results = self.retriever.search(collection, query, limit=n_results)
-        docs = []
         for r in results:
             payload = r.get("payload", {})
-            # Read triple object format
+            score = r.get("score", 0)
+            
+            if score < fact_threshold:
+                continue
+            
             if "subject" in payload and "predicate" in payload and "object" in payload:
-                docs.append(f"- {payload.get('subject')} {payload.get('predicate')} {payload.get('object')}.")
+                fact_text = f"{payload.get('subject')} {payload.get('predicate')} {payload.get('object')}"
             else:
-                docs.append(f"- {payload.get('text', '')}")
+                fact_text = payload.get("text", "")
+            
+            if fact_text:
+                scored_items.append({
+                    "text": fact_text,
+                    "heading": "",
+                    "score": round(score, 3),
+                    "type": "fact",
+                })
+        
+        # Sort all items by score descending, cap at 8
+        scored_items.sort(key=lambda x: x["score"], reverse=True)
+        scored_items = scored_items[:8]
+        
+        # Build plain doc list for backward compatibility
+        all_docs = []
+        for item in scored_items:
+            if item["type"] == "summary" and item["heading"]:
+                all_docs.append(f"📄 [{item['heading']}]: {item['text']}")
+            elif item["type"] == "fact":
+                all_docs.append(f"📌 {item['text']}.")
+            else:
+                all_docs.append(item["text"])
+        
+        if all_docs:
+            fact_count = sum(1 for i in scored_items if i["type"] == "fact")
+            logger.info(f"[RETRIEVE] Returning {len(all_docs)} items ({summary_count} summaries + {fact_count} facts)")
+            for i, item in enumerate(scored_items[:5]):
+                logger.debug(f"[RETRIEVE]   [{i}] score={item['score']:.3f} type={item['type']} → {item['text'][:100]}")
+        else:
+            logger.warning(f"[RETRIEVE] Zero memories above confidence threshold for: '{query[:60]}'")
                 
         return {
             "type": collection,
-            "documents": docs
+            "documents": all_docs,
+            "scored_items": scored_items,
         }
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:

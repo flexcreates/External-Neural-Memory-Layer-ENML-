@@ -171,7 +171,7 @@ def main():
     try:
         orchestrator = Orchestrator()
         classifier = InputClassifier()
-        doc_ingester = DocumentIngester(orchestrator.memory_manager)
+        doc_ingester = DocumentIngester(orchestrator.memory_manager, llm_client=orchestrator.client)
         logger.info("Orchestrator initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize Orchestrator: {e}")
@@ -229,8 +229,8 @@ def main():
                 try:
                     result = doc_ingester.ingest(user_input, source_label="pasted_document")
                     print(f"✅ Document ingested: {result['sections']} sections, "
-                          f"{result['facts_extracted']} facts extracted, "
-                          f"{result['skipped_noise']} sections skipped")
+                          f"{result.get('summaries_stored', 0)} summaries, "
+                          f"{result['facts_extracted']} facts extracted")
                 except Exception as e:
                     print(f"❌ Document ingestion failed: {e}")
                     logger.error(f"Document ingestion error: {e}")

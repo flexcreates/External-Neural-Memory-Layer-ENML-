@@ -17,10 +17,14 @@ class ContextBuilder:
         """
         Builds the context and returns messages & temperature based on query mode.
         """
-        # 1. Routing & Retrieval (capped at 10 to prevent context overflow)
-        retrieval_data = self.memory_manager.retrieve_context(user_input, n_results=min(n_results, 10) if hasattr(self, '_n_results_override') else 5)
+        logger.info(f"[INJECT] Building context for: '{user_input[:60]}'")
+        
+        # 1. Routing & Retrieval (confidence-scored)
+        retrieval_data = self.memory_manager.retrieve_context(user_input, n_results=5)
         mode = retrieval_data["type"]
         docs = retrieval_data["documents"]
+        
+        logger.info(f"[INJECT] Retrieved {len(docs)} docs from mode='{mode}'")
         
         # Deduplicate docs by content to avoid redundant memory injection
         seen = set()
@@ -30,7 +34,11 @@ class ContextBuilder:
             if doc_key not in seen:
                 seen.add(doc_key)
                 unique_docs.append(doc)
+        
+        pre_dedup = len(docs)
         docs = unique_docs[:10]  # Hard cap at 10 memories
+        if pre_dedup != len(docs):
+            logger.debug(f"[INJECT] Deduplicated: {pre_dedup} → {len(docs)} unique docs")
         
         temperature = 0.6
         effective_system_prompt = system_prompt
@@ -60,16 +68,28 @@ class ContextBuilder:
         # 3. Authority Memory Injection (Always injected)
         # Auth memory will append: "User Identity:\n... \nYou must rely on this information."
         
-        # Merge Semantic Memory directly into the system prompt for unified attention
-        if mode in ["knowledge_collection", "profile_collection", "conversation_collection"] and docs:
+        # Merge retrieved memory (summaries + facts) into the system prompt
+        # Items are already confidence-scored and sorted by memory_manager
+        if docs:
             formatted_docs = "\n".join(docs)
             effective_system_prompt += (
-                f"\n\nRelevant Known Facts:\n{formatted_docs}\n"
-                f"Only answer using the provided facts where applicable. If no relevant fact exists, say you don't know."
+                f"\n\nRelevant Memory & Context:\n{formatted_docs}\n"
+                f"IMPORTANT: Answer using ONLY the information provided above. "
+                f"Items marked 📄 are detailed document summaries — use them for content questions. "
+                f"Items marked 📌 are remembered facts about the user. "
+                f"If no relevant information is found above, say you don't have that information. "
+                f"NEVER make up information that isn't in the context above."
             )
+            logger.info(f"[INJECT] ✅ Injected {len(docs)} confidence-scored items into system prompt")
+            # Log individual scores from scored_items if available
+            scored_items = retrieval_data.get("scored_items", [])
+            for i, item in enumerate(scored_items[:5]):
+                logger.debug(f"[INJECT]   [{i}] score={item.get('score', '?')} type={item.get('type', '?')} → {item.get('text', '')[:80]}")
+        else:
+            logger.warning(f"[INJECT] ⚠ No memories above confidence threshold (mode='{mode}')")
             
         effective_system_prompt = self.memory_manager.authority_memory.get_injected_prompt(effective_system_prompt)
-        
+        logger.debug(f"[INJECT] Authority memory injected into prompt")
         messages = [{"role": "system", "content": effective_system_prompt}]
         
         # 4. Append Conversation History (with token budget enforcement)
@@ -92,6 +112,9 @@ class ContextBuilder:
             running_tokens += msg_tokens
         
         messages.extend(trimmed_history)
+        
+        logger.info(f"[PROMPT] Final context: {len(messages)} messages, ~{system_tokens + running_tokens + user_tokens} tokens, temp={temperature}")
+        logger.debug(f"[PROMPT] System prompt preview: {effective_system_prompt[:300]}...")
         
         return messages, temperature
 

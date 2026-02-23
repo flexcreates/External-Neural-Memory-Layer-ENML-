@@ -33,6 +33,7 @@ QDRANT_PROJECT_COLLECTION = os.getenv("QDRANT_PROJECT_COLLECTION", "project_coll
 QDRANT_CONVERSATION_COLLECTION = os.getenv("QDRANT_CONVERSATION_COLLECTION", "conversation_collection")
 QDRANT_PROFILE_COLLECTION = os.getenv("QDRANT_PROFILE_COLLECTION", "profile_collection")
 QDRANT_KNOWLEDGE_COLLECTION = os.getenv("QDRANT_KNOWLEDGE_COLLECTION", "knowledge_collection")
+QDRANT_DOCUMENT_COLLECTION = os.getenv("QDRANT_DOCUMENT_COLLECTION", "document_collection")
 
 # Model configuration
 EMBEDDING_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
@@ -45,7 +46,12 @@ AI_HINT = os.getenv("AI_HINT", "running on local hardware")
 MAX_REALTIME_INPUT_CHARS = int(os.getenv("MAX_REALTIME_INPUT_CHARS", 500))
 MAX_FACTS_PER_EXTRACTION = int(os.getenv("MAX_FACTS_PER_EXTRACTION", 10))
 MAX_DOCUMENT_FACTS = int(os.getenv("MAX_DOCUMENT_FACTS", 25))
+MAX_DOCUMENT_SUMMARIES = int(os.getenv("MAX_DOCUMENT_SUMMARIES", 15))
+MIN_RETRIEVAL_CONFIDENCE = float(os.getenv("MIN_RETRIEVAL_CONFIDENCE", 0.30))
 CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", 8192))
 
 # Web Server
 WEB_SERVER_PORT = int(os.getenv("WEB_SERVER_PORT", 5000))
+
+# Debug Mode (set ENML_DEBUG=1 to enable verbose console logging)
+ENML_DEBUG = os.getenv("ENML_DEBUG", "0") == "1"

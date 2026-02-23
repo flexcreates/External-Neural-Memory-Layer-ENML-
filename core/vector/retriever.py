@@ -48,7 +48,9 @@ class Retriever:
             filter_conditions: Raw Qdrant FieldCondition list (advanced).
             filter_dict: Simple key-value dict converted to exact-match filters.
         """
+        logger.info(f"[RETRIEVE] Searching '{collection}' for: '{query[:80]}' (limit={limit})")
         query_vector = self.embedding_service.embed(query)
+        logger.debug(f"[RETRIEVE] Embedding generated: {len(query_vector)}-dim vector")
         
         # We implicitly only ever want 'active' or 'alternative' facts, never 'superseded' ones
         must_not_conditions = [
@@ -86,8 +88,9 @@ class Retriever:
                 with_payload=True
             )
             results = response.points
+            logger.info(f"[RETRIEVE] Qdrant returned {len(results)} raw results from '{collection}'")
         except Exception as e:
-            logger.error(f"Qdrant search failed on '{collection}': {e}")
+            logger.error(f"[RETRIEVE] Qdrant search FAILED on '{collection}': {e}")
             return []
                 
         # 2. Local Re-Ranking (Entity Match + Recency)
@@ -121,5 +124,14 @@ class Retriever:
         # Sort by hybrid score and limit
         scored_results.sort(key=lambda x: x[0], reverse=True)
         final_results = [item[1] for item in scored_results[:limit]]
+        
+        if final_results:
+            logger.info(f"[RETRIEVE] Returning {len(final_results)} results (top score: {final_results[0]['score']:.3f})")
+            for i, r in enumerate(final_results[:3]):
+                p = r.get('payload', {})
+                fact_str = p.get('text', f"{p.get('subject','')} {p.get('predicate','')} {p.get('object','')}")
+                logger.debug(f"[RETRIEVE]   [{i+1}] score={r['score']:.3f} → {fact_str[:100]}")
+        else:
+            logger.warning(f"[RETRIEVE] No results found in '{collection}' for query: '{query[:60]}'")
                 
         return final_results

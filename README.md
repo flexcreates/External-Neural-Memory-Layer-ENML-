@@ -80,18 +80,20 @@ Every message is analyzed by the LLM to extract semantic triples:
 - Multi-value support: hobbies, pets, and projects stack without overwriting
 - **Capped extraction**: max 10 facts per message to prevent memory overload
 
-### 📄 Document Ingestion Pipeline
+### 📄 Document Ingestion & Summarization Pipeline
 Paste large documents (README files, documentation, code) and ENML handles them intelligently:
 - **Auto-detection**: inputs over 500 chars or with markdown structure are classified as documents
-- **Section chunking**: documents split by headings/paragraphs for focused extraction
-- **Noise filtering**: code blocks, ASCII art, URLs, and file paths are stripped before extraction
-- **Fact cap**: max 25 facts per document to prevent memory explosion
-- **Multi-line paste**: terminal input is buffered so pasted content arrives as a single message
+- **Section chunking**: documents split by headings/paragraphs for focused processing
+- **LLM-powered summarization**: each section is summarized by the LLM, preserving all names, numbers, file paths, and technical details
+- **Dual-layer storage**: summaries stored in `document_collection` for rich retrieval + facts extracted into `knowledge_collection`
+- **Confidence-scored retrieval**: retrieved items carry semantic similarity scores; only items above threshold are injected
+- **Noise filtering**: code blocks, ASCII art, URLs, and file paths are stripped before processing
+- **Caps**: max 15 summaries + 25 facts per document to prevent memory explosion
 
 ```
 You: [paste a 300-line README.md]
 📄 Large input detected (9378 chars, 281 lines) — ingesting as document...
-✅ Document ingested: 29 sections, 25 facts extracted, 3 sections skipped
+✅ Document ingested: 29 sections, 12 summaries, 25 facts extracted
 ```
 
 ### 🌐 Web UI
@@ -101,9 +103,12 @@ A beautiful dark-themed chat interface at `http://localhost:5000`:
 - Document paste support with ingestion feedback
 - Session management across browser tabs
 
-### 🔍 Smart Query Routing
+### 🔍 Smart Query Routing & Confidence Retrieval
 The context builder searches Qdrant for relevant memories and injects them into the system prompt — so the AI always has context about you.
-- **Memory cap**: max 10 memories injected per query
+- **Confidence scoring**: every retrieved item carries a semantic similarity score
+- **Threshold filtering**: only items above minimum confidence (0.30) are injected
+- **Hybrid retrieval**: always searches both document summaries and knowledge facts
+- **Memory cap**: max 8 scored items injected per query
 - **Deduplication**: redundant memories are filtered before injection
 - **Token budget**: 6000-token context window for rich responses
 
@@ -173,11 +178,11 @@ Facts are stored as semantic triples with contradiction detection:
 | `web_server.py` | Flask web UI with SSE streaming and full ENML pipeline |
 | `core/orchestrator.py` | Main pipeline: extract → store → build context → stream response |
 | `core/memory/extractor.py` | LLM-based fact extraction with document detection and noise filtering |
-| `core/memory/document_ingester.py` | Batch document pipeline: chunk → clean → extract → store |
+| `core/memory/document_ingester.py` | LLM-summarized document ingestion: chunk → clean → summarize → store |
 | `core/memory_manager.py` | Routes facts to Knowledge Graph, Authority Memory, or Qdrant |
 | `core/knowledge_graph.py` | Semantic triple storage with contradiction detection (50+ multi-value predicates) |
 | `core/memory/authority_memory.py` | Deterministic JSON profile for AI and user identity |
-| `core/context_builder.py` | Builds LLM prompt with memory injection (capped at 10, deduplicated) |
+| `core/context_builder.py` | Builds LLM prompt with confidence-scored memory injection |
 | `core/config.py` | Centralized `.env` loader with configurable limits |
 | `core/vector/retriever.py` | Qdrant semantic search with re-ranking |
 | `core/vector/embeddings.py` | Thread-safe singleton embedding service (CPU-optimized) |
@@ -229,11 +234,13 @@ QDRANT_URL=http://localhost:6333
 EMBED_MODEL=all-MiniLM-L6-v2
 EMBED_DIM=384
 
-# Context & Extraction Limits (v2.1)
+# Context & Extraction Limits (v3.0)
 CONTEXT_SIZE=8192                # LLM context window size
 MAX_REALTIME_INPUT_CHARS=500     # Threshold for document detection
 MAX_FACTS_PER_EXTRACTION=10      # Max facts per single extraction call
 MAX_DOCUMENT_FACTS=25            # Max facts per document ingestion
+MAX_DOCUMENT_SUMMARIES=15        # Max LLM-generated summaries per document
+MIN_RETRIEVAL_CONFIDENCE=0.30    # Minimum confidence score for memory injection
 
 # Web UI
 WEB_SERVER_PORT=5000             # Web chat UI port
@@ -347,6 +354,8 @@ ENML/
 - [x] Memory injection limits and deduplication
 - [x] Configurable context window (up to 8192 tokens)
 - [x] CPU-optimized embedding model (VRAM reserved for LLM)
+- [x] Document summarization pipeline (LLM-powered section summaries)
+- [x] Confidence-scored retrieval with threshold filtering
 - [ ] Web research ingestion pipeline
 - [ ] Multi-modal memory (images, documents)
 - [ ] Conversation summarization

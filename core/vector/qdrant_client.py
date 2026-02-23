@@ -5,7 +5,7 @@ from qdrant_client.http import models
 from core.config import (
     QDRANT_URL, QDRANT_API_KEY,
     QDRANT_RESEARCH_COLLECTION, QDRANT_PROJECT_COLLECTION, QDRANT_CONVERSATION_COLLECTION,
-    QDRANT_PROFILE_COLLECTION, QDRANT_KNOWLEDGE_COLLECTION, EMBED_DIM
+    QDRANT_PROFILE_COLLECTION, QDRANT_KNOWLEDGE_COLLECTION, QDRANT_DOCUMENT_COLLECTION, EMBED_DIM
 )
 from core.logger import get_logger
 
@@ -33,7 +33,8 @@ class QdrantManager:
                         QDRANT_PROJECT_COLLECTION,
                         QDRANT_CONVERSATION_COLLECTION,
                         QDRANT_PROFILE_COLLECTION,
-                        QDRANT_KNOWLEDGE_COLLECTION
+                        QDRANT_KNOWLEDGE_COLLECTION,
+                        QDRANT_DOCUMENT_COLLECTION,
                     ]
                     instance._ensure_collections()
                     cls._instance = instance
