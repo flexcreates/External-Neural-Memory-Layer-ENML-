@@ -11,9 +11,10 @@ _lock = threading.Lock()
 class EmbeddingService:
     """Singleton wrapper around SentenceTransformer.
     
-    The model is loaded once and shared across all callers (Retriever,
+    The model is loaded once on CPU and shared across all callers (Retriever,
     EntityLinker, ingestion scripts) to avoid duplicating the ~90 MB
-    in-memory model.
+    in-memory model. CPU is used intentionally because the LLM server
+    already occupies most VRAM.
     """
     _instance = None
 
@@ -22,8 +23,8 @@ class EmbeddingService:
             with _lock:
                 if cls._instance is None:
                     instance = super().__new__(cls)
-                    logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")
-                    instance.model = SentenceTransformer(EMBEDDING_MODEL)
+                    logger.info(f"Loading embedding model: {EMBEDDING_MODEL} (on CPU)")
+                    instance.model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
                     cls._instance = instance
         return cls._instance
 

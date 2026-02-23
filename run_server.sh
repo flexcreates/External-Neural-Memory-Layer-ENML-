@@ -19,7 +19,7 @@ LLAMA_SERVER="${LLAMA_SERVER:-/path/to/llama.cpp/llama-server}"
 LLAMA_URL="${LLAMA_SERVER_URL:-http://localhost:8080}"
 PORT=$(echo "$LLAMA_URL" | grep -oP ':\K[0-9]+$' || echo "8080")
 HOST="0.0.0.0"
-CONTEXT_SIZE=3072
+CONTEXT_SIZE="${CONTEXT_SIZE:-8192}"
 BATCH_SIZE=1024
 
 # Validate paths

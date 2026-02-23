@@ -2,7 +2,7 @@ import json
 import re
 from typing import Dict, Any, List, Union
 from openai import OpenAI
-from core.config import LLAMA_SERVER_URL
+from core.config import LLAMA_SERVER_URL, MAX_FACTS_PER_EXTRACTION
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -200,12 +200,13 @@ class MemoryExtractor:
             'general_knowledge': 0.80,  # Was 0.90
         }
         
-    def extract_facts(self, user_input: str, conversation_context: str = "") -> List[Dict[str, Any]]:
+    def extract_facts(self, user_input: str, conversation_context: str = "", max_facts: int = MAX_FACTS_PER_EXTRACTION) -> List[Dict[str, Any]]:
         """Extract semantic triples from user input.
         
         Args:
             user_input: The current user message.
             conversation_context: Recent conversation history for pronoun resolution.
+            max_facts: Maximum number of facts to return (prevents memory explosion).
         """
         if not user_input or not isinstance(user_input, str):
             return []
@@ -213,6 +214,11 @@ class MemoryExtractor:
         # Pre-check: immediately skip questions and commands
         if self._is_question_or_command(user_input):
             logger.info(f"Skipping extraction (question/command): {user_input[:60]}...")
+            return []
+        
+        # Pre-check: skip document/structured content (markdown, code, ASCII art)
+        if self._is_document_content(user_input):
+            logger.info(f"Skipping extraction (document content): {user_input[:60]}...")
             return []
             
         logger.debug(f"Extracting facts from: '{user_input[:100]}...'")
@@ -279,6 +285,12 @@ class MemoryExtractor:
                     continue
                     
             logger.info(f"Extracted {len(verified_facts)}/{len(facts)} facts")
+            
+            # Hard cap on facts per extraction to prevent memory explosion
+            if len(verified_facts) > max_facts:
+                logger.warning(f"Capping extraction from {len(verified_facts)} to {max_facts} facts")
+                verified_facts = verified_facts[:max_facts]
+            
             return verified_facts
             
         except Exception as e:
@@ -331,6 +343,52 @@ class MemoryExtractor:
         
         return False
     
+    # ── Document/structured content detection ────────────────────────────
+    
+    _DOCUMENT_INDICATORS = [
+        re.compile(r'^#{1,6}\s+\w', re.MULTILINE),         # Markdown headings
+        re.compile(r'```\w*\s*\n', re.MULTILINE),           # Code fences
+        re.compile(r'\|[-:]+\|', re.MULTILINE),             # Table separators
+        re.compile(r'[┌┐└┘├┤┬┴┼─│═║╔╗╚╝╠╣╦╩╬]'),          # ASCII box-drawing
+        re.compile(r'^\s*[-*]\s+\[[ x]\]', re.MULTILINE),   # Task lists
+    ]
+    
+    def _is_document_content(self, text: str) -> bool:
+        """Detect structured/documentation content that should NOT go through LLM extraction.
+        
+        Returns True for markdown docs, code blocks, ASCII diagrams, tables, etc.
+        """
+        if not text:
+            return False
+        
+        text_stripped = text.strip()
+        
+        # Quick length check — very long inputs are almost certainly documents
+        if len(text_stripped) > 2000:
+            return True
+        
+        # Count structural indicators
+        indicator_hits = 0
+        for pattern in self._DOCUMENT_INDICATORS:
+            if pattern.search(text_stripped):
+                indicator_hits += 1
+        
+        # If 2+ structural patterns match, it's a document
+        if indicator_hits >= 2:
+            return True
+        
+        # High newline density (documents have many short lines)
+        lines = text_stripped.split('\n')
+        if len(lines) > 10 and len(text_stripped) / max(len(lines), 1) < 60:
+            return True
+        
+        # URL density — if >3 URLs in the text, likely documentation
+        url_count = len(re.findall(r'https?://\S+', text_stripped))
+        if url_count >= 3:
+            return True
+        
+        return False
+    
     # ── Noise filter: reject filler facts ───────────────────────────────
     
     _NOISE_PREDICATES = {
@@ -338,6 +396,10 @@ class MemoryExtractor:
         'greets', 'introduces', 'mentions', 'states', 'inquires', 'responds',
         'is_about', 'has_question', 'has_command', 'has_response', 'has_message',
         'is_greeting', 'is_question', 'is_command',
+        # Document/structural noise
+        'has_feature', 'has_file', 'has_path', 'contains', 'has_section',
+        'has_diagram', 'has_header', 'has_link', 'has_url', 'has_code',
+        'has_table', 'has_list', 'has_block', 'has_line',
     }
     
     def _is_noise_fact(self, fact: Dict) -> bool:
@@ -373,10 +435,31 @@ class MemoryExtractor:
         
         Prevents collisions like 'user uses ubuntu' vs 'user uses ENML'
         by normalizing 'uses' + OS → 'uses_os', 'uses' + lang → 'has_skill', etc.
+        Also normalizes plural predicates to singular canonical forms.
         """
         predicate = fact.get("predicate", "").lower()
         obj_lower = fact.get("object", "").lower()
         
+        # ── Plural → singular normalization ──
+        _PLURAL_TO_SINGULAR = {
+            'has_hobbies': 'has_hobby',
+            'has_interests': 'has_interest',
+            'has_pets': 'has_pet',
+            'has_skills': 'has_skill',
+            'has_projects': 'has_project',
+            'has_friends': 'has_friend',
+            'has_siblings': 'has_sibling',
+            'has_devices': 'has_device',
+            'has_computers': 'has_computer',
+            'has_features': 'has_feature',
+            'has_components': 'has_component',
+            'has_modules': 'has_module',
+        }
+        if predicate in _PLURAL_TO_SINGULAR:
+            fact["predicate"] = _PLURAL_TO_SINGULAR[predicate]
+            predicate = fact["predicate"]
+        
+        # ── Content-based normalization ──
         if predicate == "uses":
             obj_words = set(obj_lower.split())
             if obj_words & self._OS_KEYWORDS:

@@ -7,6 +7,7 @@
     <a href="#-quick-start">Quick Start</a> •
     <a href="#-features">Features</a> •
     <a href="#-architecture">Architecture</a> •
+    <a href="#-web-ui">Web UI</a> •
     <a href="#-configuration">Configuration</a> •
     <a href="docs/USER_GUIDE.md">User Guide</a> •
     <a href="docs/DEVELOPMENT.md">Dev Guide</a>
@@ -61,9 +62,12 @@ nano .env
 ./run_server.sh        # Terminal 1: Start Llama server
 ./run_qdrant.sh        # Terminal 2: Start Qdrant (if not started by setup)
 
-# 5. Start chatting!
+# 5a. Start chatting (CLI)!
 source .venv/bin/activate
 python3 chat.py
+
+# 5b. Or launch the Web UI
+./run_web.sh           # Opens at http://localhost:5000
 ```
 
 ---
@@ -74,9 +78,34 @@ python3 chat.py
 Every message is analyzed by the LLM to extract semantic triples:
 - `user has_name Flex` · `user has_pet lizard` · `user has_interest vibe-coding`
 - Multi-value support: hobbies, pets, and projects stack without overwriting
+- **Capped extraction**: max 10 facts per message to prevent memory overload
+
+### 📄 Document Ingestion Pipeline
+Paste large documents (README files, documentation, code) and ENML handles them intelligently:
+- **Auto-detection**: inputs over 500 chars or with markdown structure are classified as documents
+- **Section chunking**: documents split by headings/paragraphs for focused extraction
+- **Noise filtering**: code blocks, ASCII art, URLs, and file paths are stripped before extraction
+- **Fact cap**: max 25 facts per document to prevent memory explosion
+- **Multi-line paste**: terminal input is buffered so pasted content arrives as a single message
+
+```
+You: [paste a 300-line README.md]
+📄 Large input detected (9378 chars, 281 lines) — ingesting as document...
+✅ Document ingested: 29 sections, 25 facts extracted, 3 sections skipped
+```
+
+### 🌐 Web UI
+A beautiful dark-themed chat interface at `http://localhost:5000`:
+- Full ENML pipeline — same memory, extraction, and knowledge graph as CLI
+- SSE streaming for real-time response display
+- Document paste support with ingestion feedback
+- Session management across browser tabs
 
 ### 🔍 Smart Query Routing
 The context builder searches Qdrant for relevant memories and injects them into the system prompt — so the AI always has context about you.
+- **Memory cap**: max 10 memories injected per query
+- **Deduplication**: redundant memories are filtered before injection
+- **Token budget**: 6000-token context window for rich responses
 
 ### 🛡️ Identity Separation
 AI identity and user identity are stored separately:
@@ -88,17 +117,20 @@ AI identity and user identity are stored separately:
 Facts are stored as semantic triples with contradiction detection:
 - `user has_name Flex` (active) → `user has_name David` (supersedes old value)
 - Multi-value predicates (hobbies, pets) allow multiple active values
+- **50+ multi-value predicates** including singular and plural forms
 
 ### 🧹 Intelligent Filtering
-- **Question pre-check**: Questions and commands skip extraction entirely
-- **Noise filter**: Greetings and filler are rejected before storage
-- **Name guard**: Device/brand names can't overwrite your identity
-- **Predicate normalization**: `uses Ubuntu` → `uses_os Ubuntu` (prevents collisions)
+- **Question pre-check**: questions and commands skip extraction entirely
+- **Document detection**: structured content (markdown, tables, code) bypasses real-time extraction
+- **Noise filter**: greetings, filler, and structural predicates are rejected before storage
+- **Name guard**: device/brand names can't overwrite your identity
+- **Predicate normalization**: `uses Ubuntu` → `uses_os Ubuntu`, `has_hobbies` → `has_hobby`
 
 ### 🔒 100% Local & Private
 - All processing happens on your machine
 - No cloud APIs, no telemetry, no data leaves your system
 - Qdrant runs in a local Docker container
+- Embedding model runs on CPU (VRAM reserved for LLM)
 
 ---
 
@@ -106,8 +138,13 @@ Facts are stored as semantic triples with contradiction detection:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        chat.py (CLI)                        │
-├─────────────────────────────────────────────────────────────┤
+│              chat.py (CLI)  ·  web_server.py (Browser)      │
+│                    ↓ InputClassifier ↓                      │
+│              ┌─────────────┬─────────────────┐              │
+│              │ Conversation │    Document     │              │
+│              │   (normal)   │  (batch ingest) │              │
+│              └──────┬──────┴────────┬────────┘              │
+├─────────────────────┼───────────────┼───────────────────────┤
 │                   core/orchestrator.py                      │
 │        ┌──────────┬───────────────┬───────────────┐         │
 │        │ Extractor│ MemoryManager │ ContextBuilder│         │
@@ -132,15 +169,41 @@ Facts are stored as semantic triples with contradiction detection:
 
 | Module | Purpose |
 |---|---|
+| `chat.py` | CLI interface with multi-line paste support and input classification |
+| `web_server.py` | Flask web UI with SSE streaming and full ENML pipeline |
 | `core/orchestrator.py` | Main pipeline: extract → store → build context → stream response |
-| `core/memory/extractor.py` | LLM-based fact extraction with regex safety nets |
+| `core/memory/extractor.py` | LLM-based fact extraction with document detection and noise filtering |
+| `core/memory/document_ingester.py` | Batch document pipeline: chunk → clean → extract → store |
 | `core/memory_manager.py` | Routes facts to Knowledge Graph, Authority Memory, or Qdrant |
-| `core/knowledge_graph.py` | Semantic triple storage with contradiction detection |
+| `core/knowledge_graph.py` | Semantic triple storage with contradiction detection (50+ multi-value predicates) |
 | `core/memory/authority_memory.py` | Deterministic JSON profile for AI and user identity |
-| `core/context_builder.py` | Builds LLM prompt with memory context injection |
+| `core/context_builder.py` | Builds LLM prompt with memory injection (capped at 10, deduplicated) |
+| `core/config.py` | Centralized `.env` loader with configurable limits |
 | `core/vector/retriever.py` | Qdrant semantic search with re-ranking |
-| `core/vector/embeddings.py` | Thread-safe singleton embedding service |
+| `core/vector/embeddings.py` | Thread-safe singleton embedding service (CPU-optimized) |
 | `core/vector/qdrant_client.py` | Thread-safe singleton Qdrant connection manager |
+
+---
+
+## 🌐 Web UI
+
+ENML includes a built-in web chat interface powered by Flask:
+
+```bash
+# Start the web server
+./run_web.sh
+# Open http://localhost:5000 in your browser
+```
+
+**Features:**
+- Dark-themed modern interface with Inter & JetBrains Mono fonts
+- Real-time SSE streaming responses
+- Paste documents directly — auto-detected and batch-processed
+- Same ENML memory pipeline as CLI (extraction, knowledge graph, authority memory)
+- Session management with conversation history
+- Health check endpoint at `/api/health`
+
+The web UI port is configurable via `WEB_SERVER_PORT` in `.env` (default: `5000`).
 
 ---
 
@@ -165,6 +228,15 @@ QDRANT_URL=http://localhost:6333
 # Embedding model
 EMBED_MODEL=all-MiniLM-L6-v2
 EMBED_DIM=384
+
+# Context & Extraction Limits (v2.1)
+CONTEXT_SIZE=8192                # LLM context window size
+MAX_REALTIME_INPUT_CHARS=500     # Threshold for document detection
+MAX_FACTS_PER_EXTRACTION=10      # Max facts per single extraction call
+MAX_DOCUMENT_FACTS=25            # Max facts per document ingestion
+
+# Web UI
+WEB_SERVER_PORT=5000             # Web chat UI port
 ```
 
 See [`.env.example`](.env.example) for the complete configuration reference.
@@ -175,28 +247,34 @@ See [`.env.example`](.env.example) for the complete configuration reference.
 
 ```
 ENML/
-├── chat.py                 # CLI chat interface
+├── chat.py                 # CLI chat interface (paste-safe, input classification)
+├── web_server.py           # Flask web chat UI with SSE streaming
 ├── setup.sh                # One-command installer
-├── run_server.sh           # Llama.cpp server launcher
+├── run_server.sh           # Llama.cpp server launcher (8192 context)
 ├── run_qdrant.sh           # Qdrant Docker manager
+├── run_web.sh              # Web UI startup script
 ├── reset_memory.sh         # Memory wipe utility
-├── requirements.txt        # Python dependencies
+├── requirements.txt        # Python dependencies (includes Flask)
 ├── .env.example            # Configuration template
 │
+├── templates/              # Web UI
+│   └── chat.html           # Dark-themed chat interface
+│
 ├── core/                   # Core engine
-│   ├── config.py           # .env loader
+│   ├── config.py           # .env loader with configurable limits
 │   ├── orchestrator.py     # Main pipeline
 │   ├── memory_manager.py   # Fact routing
-│   ├── context_builder.py  # Prompt builder
-│   ├── knowledge_graph.py  # Triple store
+│   ├── context_builder.py  # Prompt builder (capped, deduplicated)
+│   ├── knowledge_graph.py  # Triple store (50+ multi-value predicates)
 │   ├── logger.py           # Logging system
 │   ├── memory/             # Memory subsystem
-│   │   ├── extractor.py    # LLM fact extraction
-│   │   ├── authority_memory.py  # JSON identity store
-│   │   └── triple_memory.py     # Triple data class
+│   │   ├── extractor.py    # LLM fact extraction + document detection
+│   │   ├── document_ingester.py  # Batch document ingestion pipeline
+│   │   ├── authority_memory.py   # JSON identity store
+│   │   └── triple_memory.py      # Triple data class
 │   ├── vector/             # Vector subsystem
 │   │   ├── retriever.py    # Qdrant search
-│   │   ├── embeddings.py   # Embedding service
+│   │   ├── embeddings.py   # Embedding service (CPU-optimized)
 │   │   └── qdrant_client.py # Connection manager
 │   ├── router/             # Query routing
 │   │   └── query_router.py
@@ -228,6 +306,8 @@ ENML/
 | `exit` | End the session and save conversation |
 | `Ctrl+C` | Force quit (session still saves) |
 
+**Paste support**: Multi-line content pasted in the terminal is automatically buffered into a single message. Documents are detected and ingested through the batch pipeline.
+
 ---
 
 ## 🔧 Shell Scripts
@@ -235,8 +315,9 @@ ENML/
 | Script | What it does |
 |---|---|
 | `setup.sh` | Complete installation: venv, deps, .env, dirs, Qdrant |
-| `run_server.sh` | Starts llama-server with VRAM-optimized GPU layers |
+| `run_server.sh` | Starts llama-server with configurable context size (default 8192) |
 | `run_qdrant.sh` | Manages Qdrant Docker container lifecycle |
+| `run_web.sh` | Starts the ENML web chat UI (Flask) |
 | `reset_memory.sh` | Wipes all memory, sessions, and vector collections |
 
 ---
@@ -259,7 +340,13 @@ ENML/
 - [x] Multi-value predicate support (hobbies, pets, projects)
 - [x] AI/user identity separation
 - [x] Question/command pre-filtering
-- [x] Predicate normalization
+- [x] Predicate normalization (singular/plural, content-based)
+- [x] Document ingestion pipeline (batch processing for large inputs)
+- [x] Web chat UI with full ENML pipeline
+- [x] Multi-line paste handling (terminal & browser)
+- [x] Memory injection limits and deduplication
+- [x] Configurable context window (up to 8192 tokens)
+- [x] CPU-optimized embedding model (VRAM reserved for LLM)
 - [ ] Web research ingestion pipeline
 - [ ] Multi-modal memory (images, documents)
 - [ ] Conversation summarization

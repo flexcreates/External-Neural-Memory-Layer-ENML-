@@ -12,24 +12,29 @@ logger = get_logger(__name__)
 
 # CRITICAL FIX: Define which predicates support multiple values (list semantics)
 MULTI_VALUE_PREDICATES: Set[str] = {
-    # Interests & hobbies
-    'has_interest', 'has_hobby', 'likes', 'enjoys', 'loves', 'prefers',
+    # Interests & hobbies (singular AND plural — LLM outputs both)
+    'has_interest', 'has_interests', 'has_hobby', 'has_hobbies',
+    'likes', 'enjoys', 'loves', 'prefers',
     # Pets
-    'has_pet', 'owns_pet', 'has_dog', 'has_cat', 'has_pet_name', 'pet_name', 'has_name_of_pet',
+    'has_pet', 'has_pets', 'owns_pet', 'has_dog', 'has_cat',
+    'has_pet_name', 'pet_name', 'has_name_of_pet',
     # Devices & tech
     'has_computer', 'uses_computer', 'has_device',
     # Usage (generic - user can use multiple things)
     'uses', 'uses_os', 'uses_tool', 'runs',
     # Skills & knowledge
-    'knows', 'speaks', 'has_skill', 'works_with', 'creates', 'makes',
+    'knows', 'speaks', 'has_skill', 'has_skills', 'works_with', 'creates', 'makes',
     # Projects & work
-    'has_project', 'working_on', 'is_working_on', 'works_on',
+    'has_project', 'has_projects', 'working_on', 'is_working_on', 'works_on',
     # Food & preferences
     'has_preferred_dish', 'has_favorite_food', 'likes_food', 'eats',
     # Physical traits (can have multiple)
     'has_moles', 'has_tattoo', 'has_scar',
     # Relationships (can have multiple)
     'has_friend', 'has_sibling', 'has_colleague',
+    # Document/capability predicates (prevent contradiction on feature lists)
+    'has_feature', 'has_component', 'has_module', 'has_capability',
+    'has_dependency', 'has_requirement', 'supports', 'includes', 'contains',
 }
 
 # Predicates that should only have ONE value (replace semantics)

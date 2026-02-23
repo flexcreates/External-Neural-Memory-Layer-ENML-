@@ -40,3 +40,12 @@ EMBED_DIM = int(os.getenv("EMBED_DIM", 384))
 LLAMA_SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://localhost:8080")
 AI_NAME = os.getenv("AI_NAME", "ENML Assistant")
 AI_HINT = os.getenv("AI_HINT", "running on local hardware")
+
+# Input & Extraction Limits
+MAX_REALTIME_INPUT_CHARS = int(os.getenv("MAX_REALTIME_INPUT_CHARS", 500))
+MAX_FACTS_PER_EXTRACTION = int(os.getenv("MAX_FACTS_PER_EXTRACTION", 10))
+MAX_DOCUMENT_FACTS = int(os.getenv("MAX_DOCUMENT_FACTS", 25))
+CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", 8192))
+
+# Web Server
+WEB_SERVER_PORT = int(os.getenv("WEB_SERVER_PORT", 5000))

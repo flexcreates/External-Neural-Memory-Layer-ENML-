@@ -19,7 +19,8 @@ class Orchestrator:
                         user_input: str, 
                         session_id: str, 
                         history: List[Dict[str, str]],
-                        system_prompt: str = "You are a helpful AI.") -> Generator[str, None, None]:
+                        system_prompt: str = "You are a helpful AI.",
+                        skip_extraction: bool = False) -> Generator[str, None, None]:
         """
         Processes a user message through the ENML pipeline.
         
@@ -29,6 +30,10 @@ class Orchestrator:
         3. Build Prompt
         4. Call LLM (Stream)
         5. Store Result
+        
+        Args:
+            skip_extraction: If True, skip fact extraction (used when document
+                           ingestion was already handled by the caller).
         """
         logger.info(f"Processing message for session {session_id}")
         
@@ -43,7 +48,8 @@ class Orchestrator:
         # 1. Update Profile Immediately (Real-time Learning)
         # Pass recent conversation context so the extractor can resolve pronouns
         # like "its", "that", "this" (e.g., "its David" refers to the pet turtle)
-        self.memory_manager.update_profile(user_input, conversation_history=history)
+        if not skip_extraction:
+            self.memory_manager.update_profile(user_input, conversation_history=history)
 
         # 2. Build Context
         # For this implementation, we assume 'history' contains the conversation SO FAR.

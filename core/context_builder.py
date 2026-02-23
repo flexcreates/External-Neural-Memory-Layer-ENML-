@@ -13,14 +13,24 @@ class ContextBuilder:
                       user_input: str, 
                       history: List[Dict[str, str]], 
                       system_prompt: str = "You are a persistent AI assistant named Jarvis.",
-                      max_context_tokens: int = 2800) -> Tuple[List[Dict[str, str]], float]:
+                      max_context_tokens: int = 6000) -> Tuple[List[Dict[str, str]], float]:
         """
         Builds the context and returns messages & temperature based on query mode.
         """
-        # 1. Routing & Retrieval
-        retrieval_data = self.memory_manager.retrieve_context(user_input, n_results=5)
+        # 1. Routing & Retrieval (capped at 10 to prevent context overflow)
+        retrieval_data = self.memory_manager.retrieve_context(user_input, n_results=min(n_results, 10) if hasattr(self, '_n_results_override') else 5)
         mode = retrieval_data["type"]
         docs = retrieval_data["documents"]
+        
+        # Deduplicate docs by content to avoid redundant memory injection
+        seen = set()
+        unique_docs = []
+        for doc in docs:
+            doc_key = doc.strip().lower()
+            if doc_key not in seen:
+                seen.add(doc_key)
+                unique_docs.append(doc)
+        docs = unique_docs[:10]  # Hard cap at 10 memories
         
         temperature = 0.6
         effective_system_prompt = system_prompt
