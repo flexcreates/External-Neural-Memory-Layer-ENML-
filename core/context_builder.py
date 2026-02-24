@@ -14,7 +14,7 @@ class ContextBuilder:
                       user_input: str, 
                       history: List[Dict[str, str]], 
                       system_prompt: str = "You are a persistent AI assistant named Jarvis.",
-                      max_context_tokens: int = 6000) -> Tuple[List[Dict[str, str]], float]:
+                      max_context_tokens: int = 3000) -> Tuple[List[Dict[str, str]], float]:
         """
         Builds the context and returns messages & temperature based on query mode.
         """
@@ -102,7 +102,7 @@ class ContextBuilder:
         messages = [{"role": "system", "content": effective_system_prompt}]
         
         # 4. Append Conversation History (with token budget enforcement)
-        SLIDING_WINDOW_COUNT = 20
+        SLIDING_WINDOW_COUNT = 12
         recent_history = history[-SLIDING_WINDOW_COUNT:] if len(history) > SLIDING_WINDOW_COUNT else history
         
         # Calculate remaining token budget after system prompt

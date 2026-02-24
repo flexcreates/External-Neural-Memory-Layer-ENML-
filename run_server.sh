@@ -19,8 +19,8 @@ LLAMA_SERVER="${LLAMA_SERVER:-/path/to/llama.cpp/llama-server}"
 LLAMA_URL="${LLAMA_SERVER_URL:-http://localhost:8080}"
 PORT=$(echo "$LLAMA_URL" | grep -oP ':\K[0-9]+$' || echo "8080")
 HOST="0.0.0.0"
-CONTEXT_SIZE="${CONTEXT_SIZE:-8192}"
-BATCH_SIZE=1024
+CONTEXT_SIZE="${CONTEXT_SIZE:-4096}"
+BATCH_SIZE=512
 
 # Validate paths
 if [[ "$MODEL_PATH" == "/path/to/"* ]]; then
@@ -45,27 +45,66 @@ if [ ! -x "$LLAMA_SERVER" ]; then
     exit 1
 fi
 
-# Dynamic VRAM Layer Offloading
+# ── Dynamic VRAM Layer Offloading (GPU-Process-Aware) ────────────────
+# Reads actual free VRAM, detects all GPU processes, and calculates
+# optimal layers dynamically. Leaves BREATHING_ROOM for stability.
+BREATHING_ROOM=500           # MB — always keep free for stability
+LAYER_SIZE_MB=140            # Approx VRAM per offloaded layer
+MAX_LAYERS=22                # Safety ceiling
+
 if command -v nvidia-smi &>/dev/null; then
-    VRAM_MB=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits | head -n1)
-    RESERVED_MB=800
-    AVAILABLE=$((VRAM_MB - RESERVED_MB))
-    LAYER_SIZE_MB=140
-    MAX_LAYERS=32
+    TOTAL_VRAM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1)
+    FREE_VRAM=$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -n1)
+    USED_VRAM=$((TOTAL_VRAM - FREE_VRAM))
+    AVAILABLE=$((FREE_VRAM - BREATHING_ROOM))
+    if [ "$AVAILABLE" -lt 0 ]; then AVAILABLE=0; fi
+
     OPTIMAL=$((AVAILABLE / LAYER_SIZE_MB))
     FINAL_NGL=$((OPTIMAL < MAX_LAYERS ? OPTIMAL : MAX_LAYERS))
     if [ "$FINAL_NGL" -lt 0 ]; then FINAL_NGL=0; fi
+
+    # Detect GPU processes for the startup report
+    GPU_PROCS=$(nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader,nounits 2>/dev/null || echo "")
 else
-    VRAM_MB="N/A"
-    FINAL_NGL=32
+    TOTAL_VRAM="N/A"
+    FREE_VRAM="N/A"
+    USED_VRAM="N/A"
+    AVAILABLE="N/A"
+    GPU_PROCS=""
+    FINAL_NGL=0
 fi
 
+# ── Startup Banner ───────────────────────────────────────────────────
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║              ENML — Llama.cpp Server                      ║"
 echo "╚════════════════════════════════════════════════════════════╝"
-echo "  Model:   $(basename "$MODEL_PATH")"
-echo "  URL:     http://localhost:$PORT"
-echo "  VRAM:    ${VRAM_MB}MB free | GPU Layers: $FINAL_NGL"
+echo "  Model:     $(basename "$MODEL_PATH")"
+echo "  URL:       http://localhost:$PORT"
+echo "  Context:   ${CONTEXT_SIZE} tokens | Batch: ${BATCH_SIZE}"
+echo ""
+echo "  ── GPU Resource Allocation ──"
+if [ "$TOTAL_VRAM" != "N/A" ]; then
+    echo "  Total:     ${TOTAL_VRAM}MB"
+    echo "  Used:      ${USED_VRAM}MB (by other processes)"
+    echo "  Free:      ${FREE_VRAM}MB"
+    echo "  Reserved:  ${BREATHING_ROOM}MB (breathing room)"
+    echo "  Budget:    ${AVAILABLE}MB available for LLM"
+    echo "  Layers:    ${FINAL_NGL} GPU layers (dynamic, max ${MAX_LAYERS})"
+    echo ""
+    if [ -n "$GPU_PROCS" ]; then
+        echo "  ── Active GPU Processes ──"
+        while IFS=',' read -r pid pname mem; do
+            pid=$(echo "$pid" | xargs)
+            pname=$(echo "$pname" | xargs)
+            mem=$(echo "$mem" | xargs)
+            echo "    • ${pname} (PID ${pid}) — ${mem} MiB"
+        done <<< "$GPU_PROCS"
+    else
+        echo "  ── No other GPU processes detected ──"
+    fi
+else
+    echo "  NVIDIA GPU not detected — running CPU only (0 layers)"
+fi
 echo ""
 
 "$LLAMA_SERVER" \
@@ -73,6 +112,7 @@ echo ""
     -c "$CONTEXT_SIZE" \
     -ngl "$FINAL_NGL" \
     -b "$BATCH_SIZE" \
+    --cache-ram 2048 \
     --parallel 1 \
     --mlock \
     --flash-attn on \
