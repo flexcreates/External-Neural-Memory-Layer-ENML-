@@ -111,6 +111,7 @@ The context builder searches Qdrant for relevant memories and injects them into 
 - **Recency boosting**: recently ingested documents receive a score boost, helping the AI understand context-dependent phrases like "explain this project"
 - **Memory depth**: retrieves up to 10 document summary chunks to reconstruct full context
 - **Memory cap**: max 8 scored items injected per query
+- **Time Awareness**: Agent knows the exact real-world time at the moment of query processing, preventing chronological hallucination.
 - **Deduplication**: redundant memories are filtered before injection
 - **Token budget**: 6000-token context window for rich responses
 

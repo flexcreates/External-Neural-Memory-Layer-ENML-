@@ -69,9 +69,15 @@ class _LoggerConfigurator:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 
-        # 1. Console Handler — shows DEBUG when ENML_DEBUG=1, otherwise INFO
+        # Silence third-party garbage on console
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+        logging.getLogger("transformers").setLevel(logging.ERROR)
+
+        # 1. Console Handler — shows DEBUG when ENML_DEBUG=1, otherwise WARNING to keep UI clean
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG if ENML_DEBUG else logging.INFO)
+        console_handler.setLevel(logging.DEBUG if ENML_DEBUG else logging.WARNING)
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
 

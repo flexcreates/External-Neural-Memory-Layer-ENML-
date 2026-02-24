@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional, Tuple
 import re
 from .memory_manager import MemoryManager
+from .time_provider import TimeProvider
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -65,15 +66,17 @@ class ContextBuilder:
         else: # Conversation / General Semantic Profile
             temperature = 0.6
         
-        # 3. Dynamic Knowledge Sufficiency Feedback
-        sufficiency_feedback = "\nLocal Knowledge Confidence: HIGH" if docs and len(docs) > 0 else "\nLocal Knowledge Confidence: LOW\nWeb Research Allowed: TRUE"
+        # 3. Dynamic Knowledge Sufficiency Feedback & System Time
+        system_time = f"System Time: {TimeProvider.formatted()}"
+        sufficiency_feedback = "Local Knowledge Confidence: HIGH" if docs and len(docs) > 0 else "Local Knowledge Confidence: LOW\nWeb Research Allowed: TRUE"
         
         # Merge retrieved memory (summaries + facts) into the system prompt
         # Items are already confidence-scored and sorted by memory_manager
         if docs:
             formatted_docs = "\n".join(docs)
             effective_system_prompt += (
-                f"\n\nRelevant Graph Memory & Context:\n{formatted_docs}\n"
+                f"\n\nRelevant Graph Memory & Context:\n{formatted_docs}\n\n"
+                f"{system_time}\n"
                 f"{sufficiency_feedback}\n\n"
                 f"IMPORTANT: Answer using ONLY the information provided above when applicable. "
                 f"Items marked 📄 are detailed document summaries. "
@@ -86,6 +89,7 @@ class ContextBuilder:
                 logger.debug(f"[INJECT]   [{i}] score={item.get('score', '?')} type={item.get('type', '?')} → {item.get('text', '')[:80]}")
         else:
             effective_system_prompt += (
+                f"\n\n{system_time}\n"
                 f"{sufficiency_feedback}\n\n"
                 f"No specific Graph memories located. Answer using standard knowledge."
             )
