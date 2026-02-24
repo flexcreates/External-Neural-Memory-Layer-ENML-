@@ -239,7 +239,7 @@ EMBED_MODEL=all-MiniLM-L6-v2
 EMBED_DIM=384
 
 # Context & Extraction Limits (v3.0)
-CONTEXT_SIZE=8192                # LLM context window size
+CONTEXT_SIZE=4096                # LLM context window size
 MAX_REALTIME_INPUT_CHARS=500     # Threshold for document detection
 MAX_FACTS_PER_EXTRACTION=10      # Max facts per single extraction call
 MAX_DOCUMENT_FACTS=25            # Max facts per document ingestion
@@ -261,7 +261,7 @@ ENML/
 ├── chat.py                 # CLI chat interface (paste-safe, input classification)
 ├── web_server.py           # Flask web chat UI with SSE streaming
 ├── setup.sh                # One-command installer
-├── run_server.sh           # Llama.cpp server launcher (8192 context)
+├── run_server.sh           # Llama.cpp server launcher (dynamic GPU-aware VRAM)
 ├── run_qdrant.sh           # Qdrant Docker manager
 ├── run_web.sh              # Web UI startup script
 ├── reset_memory.sh         # Memory wipe utility
@@ -326,7 +326,7 @@ ENML/
 | Script | What it does |
 |---|---|
 | `setup.sh` | Complete installation: venv, deps, .env, dirs, Qdrant |
-| `run_server.sh` | Starts llama-server with configurable context size (default 8192) |
+| `run_server.sh` | Starts llama-server with dynamic GPU-aware VRAM and configurable context size (default 4096) |
 | `run_qdrant.sh` | Manages Qdrant Docker container lifecycle |
 | `run_web.sh` | Starts the ENML web chat UI (Flask) |
 | `reset_memory.sh` | Wipes all memory, sessions, and vector collections |
@@ -356,7 +356,7 @@ ENML/
 - [x] Web chat UI with full ENML pipeline
 - [x] Multi-line paste handling (terminal & browser)
 - [x] Memory injection limits and deduplication
-- [x] Configurable context window (up to 8192 tokens)
+- [x] Configurable context window (default 4096 tokens)
 - [x] CPU-optimized embedding model (VRAM reserved for LLM)
 - [x] Document summarization pipeline (LLM-powered section summaries)
 - [x] Confidence-scored retrieval with threshold filtering
