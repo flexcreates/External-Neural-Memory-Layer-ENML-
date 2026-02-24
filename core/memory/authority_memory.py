@@ -1,5 +1,6 @@
 import json
 import fcntl
+from datetime import datetime
 from pathlib import Path
 from core.config import MEMORY_ROOT
 from core.logger import get_logger
@@ -25,9 +26,27 @@ class AuthorityMemory:
     def _ensure_exists(self):
         if not self.profile_path.parent.exists():
             self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+            
+        default_identity = {
+            "user": {
+                "name": "Flex",
+                "age": None,
+                "preferences": {}
+            },
+            "assistant": {
+                "name": "Jarvis",
+                "creation_date": datetime.now().isoformat(),
+                "age_days": 1,
+                "environment_awareness": "System Architecture: Cognitive ENML Agent utilizing Qdrant-based hybrid RAG. Integrates WebIngestor, MemoryExtractor, and executes sequentially.",
+                "prompt_engineering": "Think step-by-step. Keep responses concise and highly analytical. Prioritize provided context over baseline knowledge.",
+                "personality_mood": "Professional, efficient, slightly witty."
+            },
+            "system": {}
+        }
+        
         if not self.profile_path.exists():
             with open(self.profile_path, 'w', encoding='utf-8') as f:
-                json.dump({"identity": {}, "system": {}}, f, indent=2)
+                json.dump(default_identity, f, indent=2)
 
     def load(self) -> dict:
         """Load the authority profile with shared file lock."""
@@ -87,21 +106,61 @@ class AuthorityMemory:
 
         lines = []
 
-        # Inject AI's own identity first
+        # ── INJECT AI IDENTITY & DIRECTIVES ──
         if "assistant" in data and data["assistant"]:
-            ai_name = data["assistant"].get("name")
-            ai_role = data["assistant"].get("role")
-            if ai_name:
-                lines.append(f"\nYour name is {ai_name}. You ARE {ai_name}.")
-            if ai_role:
-                lines.append(f"Your role: {ai_role}")
+            ai = data["assistant"]
+            ai_name = ai.get("name", "Jarvis")
+            
+            lines.append(f"Your name is {ai_name}. You ARE {ai_name}.")
+            
+            # Dynamic Auto-Aging
+            creation_str = ai.get("creation_date")
+            age_days = ai.get("age_days", 1)
+            if creation_str:
+                try:
+                    creation_dt = datetime.fromisoformat(creation_str)
+                    age_days = (datetime.now() - creation_dt).days + 1
+                    # Note: We don't save back to JSON here to avoid constant writes,
+                    # but the injected age is mathematically accurate.
+                except Exception:
+                    pass
+            lines.append(f"You are {age_days} days old.")
+            
+            if "role" in ai:
+                lines.append(f"Your Role: {ai['role']}")
+                
+            env_aware = ai.get("environment_awareness")
+            if env_aware:
+                lines.append(f"\nSystem Awareness:\n{env_aware}")
+                
+            personality = ai.get("personality_mood")
+            if personality:
+                lines.append(f"Personality & Mood: {personality}")
+                
+            prompt_eng = ai.get("prompt_engineering")
+            if prompt_eng:
+                lines.append(f"\nPrimary Directives:\n{prompt_eng}")
 
-        if "identity" in data and data["identity"]:
-            lines.append("\nUser Identity:")
-            for k, v in data["identity"].items():
-                if v is not None:
-                    lines.append(f"- {k.replace('_', ' ').title()}: {v}")
 
+        # ── INJECT USER IDENTITY ──
+        if "user" in data and data["user"]:
+            user_data = data["user"]
+            lines.append("\nUser Identity (The Person You Are Talking To):")
+            
+            user_name = user_data.get("name")
+            if user_name:
+                lines.append(f"- Name: {user_name}")
+                
+            user_age = user_data.get("age")
+            if user_age:
+                lines.append(f"- Age: {user_age}")
+                
+            if "preferences" in user_data and user_data["preferences"]:
+                lines.append("- Critical Preferences:")
+                for k, v in user_data["preferences"].items():
+                    lines.append(f"  * {k.replace('_', ' ').title()}: {v}")
+
+        # Backward compatibility for old "system" blocks
         if "system" in data and data["system"]:
             lines.append("\nSystem Specs:")
             for k, v in data["system"].items():
@@ -109,8 +168,8 @@ class AuthorityMemory:
                     lines.append(f"- {k.replace('_', ' ').title()}: {v}")
 
         if lines:
-            lines.append("\nYou must rely on this information.")
-            lines.append("If asked about personal data, use this memory.")
+            lines.append("\nYou must rigidly adhere to this internal definition of yourself and the user.")
+            lines.append("If asked about personal identity data, refer only to this memory.\n")
             return base_prompt + "\n" + "\n".join(lines)
 
         return base_prompt

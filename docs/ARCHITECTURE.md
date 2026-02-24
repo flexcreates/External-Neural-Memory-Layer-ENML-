@@ -12,7 +12,7 @@ ENML is composed of three major layers:
 ┌──────────────────────────────────────────────────────────────────┐
 │                     APPLICATION LAYER                            │
 │                                                                  │
-│  chat.py · ingest_*.py · tools/file_tool.py                     │
+│  chat.py · ingest_*.py · tools/file_tool.py                      │
 ├──────────────────────────────────────────────────────────────────┤
 │                     COGNITIVE CORE                               │
 │                                                                  │
@@ -119,7 +119,7 @@ System Prompt + History + User Message ──► LLM (streaming)
 
 | File | Purpose |
 |---|---|
-| `memory/authority/profile.json` | Deterministic identity/system profile |
+| `memory/authority/identity.json` | Permanent identity profile (AI auto-aging, User specs) |
 | `memory/graph/entities.json` | Entity registry (IDs, canonical names, aliases) |
 | `memory/graph/facts_ledger.json` | Fact version history with supersession chains |
 | `memory/graph/feedback_stats.json` | Retrieval quality statistics |

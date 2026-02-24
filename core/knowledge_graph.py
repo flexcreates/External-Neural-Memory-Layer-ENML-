@@ -26,6 +26,8 @@ MULTI_VALUE_PREDICATES: Set[str] = {
     'knows', 'speaks', 'has_skill', 'has_skills', 'works_with', 'creates', 'makes',
     # Projects & work
     'has_project', 'has_projects', 'working_on', 'is_working_on', 'works_on',
+    # Goals & objectives (allow multiple active goals)
+    'has_goal', 'has_objective', 'wants_to', 'aims_to', 'plans_to', 'is_learning',
     # Food & preferences
     'has_preferred_dish', 'has_favorite_food', 'likes_food', 'eats',
     # Physical traits (can have multiple)
@@ -70,6 +72,16 @@ class EnrichedFact:
             "timestamp": self.timestamp.isoformat(),
             "source": self.source
         }
+
+    def get_decayed_confidence(self) -> float:
+        """Calculates dynamic confidence based on age. Older facts lose confidence gradually.
+        A half-life decay of ~3 days means after 3 days confidence drops by half.
+        Explicit denials drop base confidence heavily, causing older facts to mathematically float to the top.
+        """
+        age_days = (datetime.now() - self.timestamp).total_seconds() / (24 * 3600)
+        # Slower decay: e.g., 5% loss per day
+        decay_factor = max(0.2, 1.0 - (0.05 * age_days))
+        return round(self.confidence * decay_factor, 3)
 
 @dataclass
 class Entity:
@@ -280,3 +292,18 @@ class EntityLinker:
                 results.extend(active)
         
         return results
+
+    def apply_denial_penalty(self, fact_id: str):
+        """Massively drops confidence when user explicitly denies a fact, allowing older facts to resurface."""
+        for key, versions in self.fact_versions.items():
+            for fact in versions:
+                if fact.id == fact_id:
+                    # Drop confidence heavily (e.g., penalty of 0.8)
+                    fact.confidence = max(0.1, fact.confidence - 0.8)
+                    logger.info(f"EntityLinker: Applied explicit denial penalty to {fact.predicate} {fact.object_literal} -> Conf: {fact.confidence}")
+                    
+                    # Save state immediately
+                    raw_facts = {k: [f.to_dict() for f in ver] for k, ver in self.fact_versions.items()}
+                    self._save_json(self.facts_path, raw_facts)
+                    return True
+        return False

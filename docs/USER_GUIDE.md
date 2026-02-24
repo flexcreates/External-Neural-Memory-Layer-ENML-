@@ -110,8 +110,11 @@ You: /remember I have a medical condition called ADHD
 ```
 
 ### What NOT to Do
-- Don't phrase facts as questions: `"what is my name?"` will NOT be saved as a fact
-- Don't expect the AI to learn from its own responses — only **your** messages are extracted
+- Don't expect the AI to learn from its own responses — only **your** messages are extracted.
+- ENML uses **Semantic Intent Classification**. It will intentionally *ignore* messages it classifies as:
+  - **Questions:** `"what is my name?"`
+  - **Exploration/Discussion:** `"can we discuss how Rust works?"`
+  - **Hypotheticals:** `"what if we used Python instead?"`
 
 ---
 
@@ -271,7 +274,7 @@ for res in results:
 
 ### AI hallucinating its own identity
 **Cause:** Authority memory not properly loaded.
-**Fix:** Check `memory/authority/profile.json` and verify `AI_NAME` in `.env`.
+**Fix:** Check `memory/authority/identity.json` and verify `AI_NAME` in `.env`.
 
 ### Out of memory / slow responses
 **Causes:**

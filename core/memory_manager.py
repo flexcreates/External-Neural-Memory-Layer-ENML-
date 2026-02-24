@@ -11,6 +11,7 @@ from .router.query_router import QueryRouter
 from .memory.authority_memory import AuthorityMemory
 from .memory.extractor import MemoryExtractor
 from .memory.triple_memory import MemoryTriple
+from .knowledge_graph import MULTI_VALUE_PREDICATES
 from .logger import get_logger
 from datetime import datetime
 
@@ -110,6 +111,24 @@ class MemoryManager:
         for r in results:
             payload = r.get("payload", {})
             score = r.get("score", 0)
+            
+            # Apply time-decay to multi-value predicates (goals, interests, etc)
+            predicate = payload.get("predicate", "")
+            if predicate in MULTI_VALUE_PREDICATES:
+                timestamp_str = payload.get("timestamp")
+                if timestamp_str:
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp_str)
+                        age_days = (datetime.now() - timestamp).total_seconds() / (24 * 3600)
+                        # ~5% drop per day, bottoming out at 20%
+                        decay_factor = max(0.2, 1.0 - (0.05 * age_days))
+                        
+                        # Apply decay to the base retrieval score
+                        # Ensure we multiply by the internal confidence (if it was penalized from denial)
+                        internal_conf = payload.get("confidence", 1.0)
+                        score = score * decay_factor * internal_conf
+                    except ValueError:
+                        pass
             
             if score < fact_threshold:
                 continue
@@ -214,6 +233,13 @@ class MemoryManager:
                     logger.info(f"Reclassifying assistant fact to user: {predicate} {obj}")
                     subject = "user"
                     fact["subject"] = "user"
+
+            # ── ROUTE 1.5: User identity core facts → Authority Memory ──
+            # Ensure critical user traits (name, age) get absolute priority in IdentityModule
+            if subject == "user" and self._is_user_identity_fact(predicate):
+                self._store_user_fact(predicate, obj)
+                # We still allow it to flow into the Knowledge Graph as a standard fact for retrieval/history
+
             
             # ── ROUTE 2: User/entity facts → Knowledge Graph + Qdrant ──
             # Check if this is a multi-value predicate
@@ -259,26 +285,39 @@ class MemoryManager:
     
     # Predicates that genuinely describe the AI's identity (not hardware)
     _AI_IDENTITY_PREDICATES = {'has_name', 'is_named', 'preferred_name', 'name', 'called',
-                                'has_role', 'is_a', 'is_type', 'personality', 'tone'}
+                                'has_role', 'is_a', 'is_type', 'personality', 'tone', 'mood',
+                                'prompt_engineering', 'rules', 'instructions'}
     
     def _is_ai_identity_fact(self, predicate: str) -> bool:
         """Returns True if this predicate describes the AI's identity, not hardware."""
         return predicate.lower() in self._AI_IDENTITY_PREDICATES
-    
+
+    # Core user identity predicates
+    _USER_IDENTITY_PREDICATES = {'has_name', 'is_named', 'preferred_name', 'name', 'age'}
+
+    def _is_user_identity_fact(self, predicate: str) -> bool:
+        """Returns True if this predicate describes the User's core identity."""
+        return predicate.lower() in self._USER_IDENTITY_PREDICATES
+
     def _store_assistant_fact(self, predicate: str, value: str):
-        """Route assistant identity facts (name/role ONLY) to Authority Memory.
+        """Route assistant identity facts to Authority Memory.
         
         This keeps AI identity completely separated from user identity.
-        ONLY name and role predicates are stored here.
         """
         # Map predicates to authority memory keys
         name_predicates = {'has_name', 'is_named', 'preferred_name', 'name', 'called'}
         role_predicates = {'has_role', 'is_a', 'is_type'}
+        mood_predicates = {'personality', 'tone', 'mood'}
+        prompt_predicates = {'prompt_engineering', 'rules', 'instructions'}
         
         if predicate in name_predicates:
             key = "name"
         elif predicate in role_predicates:
             key = "role" 
+        elif predicate in mood_predicates:
+            key = "personality_mood"
+        elif predicate in prompt_predicates:
+            key = "prompt_engineering"
         else:
             key = predicate
         
@@ -287,6 +326,21 @@ class MemoryManager:
             logger.info(f"MemoryManager: AI Identity Updated -> assistant.{key} = {value}")
         else:
             logger.debug(f"MemoryManager: AI identity unchanged: assistant.{key} = {value}")
+
+    def _store_user_fact(self, predicate: str, value: str):
+        """Route core User identity facts to Authority Memory for absolute priority."""
+        name_predicates = {'has_name', 'is_named', 'preferred_name', 'name'}
+        
+        if predicate in name_predicates:
+            key = "name"
+        elif predicate == "age":
+            key = "age"
+        else:
+            key = predicate
+
+        changed = self.authority_memory.upsert_fact("user", key, value)
+        if changed:
+            logger.info(f"MemoryManager: User Identity Updated -> user.{key} = {value}")
     
     def _find_existing_fact(self, subject: str, predicate: str, obj: str) -> Optional[Dict]:
         """Check if exact fact already exists to prevent duplicates."""

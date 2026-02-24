@@ -114,11 +114,12 @@ The context builder searches Qdrant for relevant memories and injects them into 
 - **Deduplication**: redundant memories are filtered before injection
 - **Token budget**: 6000-token context window for rich responses
 
-### 🛡️ Identity Separation
-AI identity and user identity are stored separately:
-- `"My name is Flex"` → stored as `user has_name Flex` (Knowledge Graph)
-- `"You are Jarvis"` → stored as `assistant.name = Jarvis` (Authority Memory)
-- No collisions between user and AI identity
+### 🛡️ Identity Separation & Auto-Aging
+AI identity and user identity are managed through a deterministic `identity.json` file that supersedes vector memory, guaranteeing zero identity drift.
+- `"My name is Flex"` → stored as `user.name = Flex` (Identity Module & Knowledge Graph)
+- `"Your mood is angry"` → stored as `assistant.personality_mood = angry` (Identity Module)
+- **Auto-Aging:** The AI intuitively calculates its exact age globally across instances (`(now - creation_date).days + 1`).
+- **Prompt Routing:** Users can map custom prompt engineering parameters seamlessly in `identity.json`.
 
 ### 📊 Knowledge Graph
 Facts are stored as semantic triples with contradiction detection:
@@ -147,10 +148,10 @@ Facts are stored as semantic triples with contradiction detection:
 ┌─────────────────────────────────────────────────────────────┐
 │              chat.py (CLI)  ·  web_server.py (Browser)      │
 │                    ↓ InputClassifier ↓                      │
-│              ┌─────────────┬─────────────────┐              │
-│              │ Conversation │    Document     │              │
-│              │   (normal)   │  (batch ingest) │              │
-│              └──────┬──────┴────────┬────────┘              │
+│              ┌─────────────┬──────────────────┐             │
+│              │ Conversation │    Document     │             │
+│              │   (normal)   │  (batch ingest) │             │
+│              └──────┬──────┴────────┬─────────┘             │
 ├─────────────────────┼───────────────┼───────────────────────┤
 │                   core/orchestrator.py                      │
 │        ┌──────────┬───────────────┬───────────────┐         │

@@ -216,11 +216,18 @@ class MemoryExtractor:
             logger.info(f"Skipping extraction (question/command): {user_input[:60]}...")
             return []
         
+        
         # Pre-check: skip document/structured content (markdown, code, ASCII art)
         if self._is_document_content(user_input):
             logger.info(f"Skipping extraction (document content): {user_input[:60]}...")
             return []
             
+        # Intent Classification: Prevent exploratory extraction
+        intent = self._classify_intent(user_input, conversation_context)
+        if intent in ["exploration", "discussion", "hypothetical", "question"]:
+            logger.info(f"Skipping extraction (Intent: {intent}): {user_input[:60]}...")
+            return []
+
         logger.debug(f"Extracting facts from: '{user_input[:100]}...'")
         
         # Build context string for the prompt
@@ -342,6 +349,58 @@ class MemoryExtractor:
                 return True
         
         return False
+    
+    # ── Intent Classification (LLM-based filter) ─────────────────────────
+    
+    def _classify_intent(self, text: str, context: str) -> str:
+        """Lightweight LLM call to classify the intent of the message.
+        Valid returns: 'fact_statement', 'exploration', 'discussion', 'hypothetical', 'question'
+        """
+        # If very short, assume fact (like "my name is Alex") or already caught by pre-check
+        if len(text.split()) < 3:
+            return "fact_statement"
+            
+        system_prompt = (
+            "You are a routing classification engine.\n"
+            "Classify the user's input into EXACTLY ONE of the following tags:\n"
+            "- 'fact_statement': The user is explicitly stating a fact, trait, project, active action (like 'learning X'), or concrete goal about themselves.\n"
+            "- 'hypothetical': The user is talking about 'what if', brainstorming, or theoretical future ideas.\n"
+            "- 'exploration': The user is asking for advice, exploring a topic, or researching.\n"
+            "- 'discussion': General back-and-forth conversational chat, explaining a concept, discussing how something works, or debating.\n"
+            "- 'question': The user is explicitly asking a question.\n\n"
+            "Respond ONLY with the exact string tag and nothing else."
+        )
+        
+        try:
+            # Pre-heuristic: If the text is clearly a question based on words, route it appropriately and skip the LLM
+            tl = text.lower()
+            if tl.startswith("how ") or tl.startswith("what is"):
+                return "question"
+            if tl.startswith("can we ") or tl.startswith("let's discuss"):
+                return "discussion"
+
+            response = self.client.chat.completions.create(
+                model="Meta-Llama-3-8B-Instruct",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Context:\n{context}\n\nInput:\n{text}"}
+                ],
+                temperature=0.0,
+                max_tokens=10
+            )
+            intent = response.choices[0].message.content.strip().lower()
+            valid_intents = {"fact_statement", "exploration", "discussion", "hypothetical", "question"}
+            if intent in valid_intents:
+                return intent
+                
+            # Fallback heuristic
+            if any(w in text.lower() for w in ["hypothetically", "what if", "maybe", "i wonder"]):
+                return "hypothetical"
+                
+            return "fact_statement"
+        except Exception as e:
+            logger.warning(f"Intent classification failed: {e}. Defaulting to fact_statement.")
+            return "fact_statement"
     
     # ── Document/structured content detection ────────────────────────────
     
